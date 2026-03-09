@@ -1,0 +1,6 @@
+marker-pdf>=1.10.2
+weasyprint>=63.0
+pikepdf>=8.10.0
+transformers>=4.44.0
+torch>=2.4.0
+markdown>=3.6

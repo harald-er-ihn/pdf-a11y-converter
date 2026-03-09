@@ -1,0 +1,29 @@
+# Python / Virtual Environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# MacOS / OS X
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Test-Dateien und Outputs
+*.pdf
+output/
+temp/
+
+# KI-Modelle (falls doch mal versehentlich in diesen Ordner geladen)
+models/
+*.bin
+*.pt
+*.safetensors
+
+# Build-Artefakte (für später, wenn wir die .exe bauen)
+build/
+dist/
+*.spec

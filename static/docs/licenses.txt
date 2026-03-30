@@ -1,0 +1,18 @@
+=== LIZENZ DIESES PROGRAMMS ===
+GPL-3.0-or-later
+© 2026 Dr. Harald Hutter
+
+=== VERWENDETE OPEN-SOURCE BIBLIOTHEKEN ===
+Dieses Programm verdankt seine Funktionalität herausragenden Open-Source-Projekten. Wir danken den Entwicklern:
+
+• docling (MIT License) - IBM Research
+• marker-pdf (Apache 2.0)
+• transformers (Apache 2.0) - HuggingFace
+• torch (BSD-Style) - Meta
+• weasyprint (BSD License)
+• pikepdf (MPL 2.0)
+• veraPDF (GPLv3 / MPL 2.0) - veraPDF Consortium
+• customtkinter (MIT License)
+• tkinterdnd2 (MIT License)
+
+Alle Rechte und Danksagungen gebühren den jeweiligen Urhebern.

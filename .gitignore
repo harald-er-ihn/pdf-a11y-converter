@@ -3,27 +3,54 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .env
 
-# MacOS / OS X
+# OS
 .DS_Store
+Thumbs.db
 
 # IDEs
 .vscode/
 .idea/
 
-# Test-Dateien und Outputs
+# Test / Output Dateien
 *.pdf
+!tests/*.pdf
+*.html
 output/
 temp/
+project_code.zip
+*.log.txt
 
-# KI-Modelle (falls doch mal versehentlich in diesen Ordner geladen)
+# Modelle
+# HINWEIS: 'resources/' und '*.pt' dürfen NICHT ignoriert werden 
+# (enthält veraPDF Profile & unser lokales YOLO-Modell)!
 models/
 *.bin
-*.pt
 *.safetensors
+.pdf-a11y-models/
 
-# Build-Artefakte (für später, wenn wir die .exe bauen)
+# Build Artefakte
 build/
 dist/
 *.spec
+*.exe
+*.app
+
+# PyInstaller
+*.toc
+*.pkg
+*.log
+*.pyz
+
+# Coverage / Testing / QA
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
+# Caches
+.cache/
+tools/bin/

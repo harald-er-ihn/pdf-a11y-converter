@@ -1,0 +1,14 @@
+{
+  "paths": {
+    "model_cache_dir": {
+      "windows": "~\\.pdf-a11y-models",
+      "linux": "~/.pdf-a11y-models",
+      "darwin": "~/.pdf-a11y-models",
+      "default": "~/.pdf-a11y-models"
+    }
+  },
+  "verapdf_profiles": {
+    "PDFUA-1": "resources/verapdf/profiles/PDFUA-1.xml",
+    "WCAG_2_2": "resources/verapdf/profiles/WCAG_2_2.xml"
+  }
+}

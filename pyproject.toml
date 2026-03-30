@@ -1,0 +1,71 @@
+[build-system]
+requires =["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-a11y-converter"
+version = "0.1.0"
+description = "Lokale KI-gestützte PDF-Rekonstruktion nach PDF/UA-1"
+authors =[{name = "Dr. Harald Hutter"}]
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "GPL-3.0-or-later"}
+
+dependencies =[
+    "customtkinter>=5.2.2",
+    "tkinterdnd2>=0.4.3",
+    "weasyprint>=63.0",
+    "pikepdf>=8.10.0",
+    "markdown>=3.6",
+    "Pillow>=10.0.0",
+    "pypdf>=5.0.0",
+    "pydantic>=2.0.0",
+    "PyMuPDF>=1.23.0",
+    "langdetect>=1.0.9"
+]
+
+[project.scripts]
+pdf-a11y = "cli:main"
+
+# ==========================================
+# FIX: Struktur-Deklaration zur Verhinderung von Duplicate Metadata
+# ==========================================
+[tool.setuptools]
+packages = ["src"]
+py-modules = ["cli", "app_gui", "converter", "build", "gpu_test"]
+
+[tool.pytest.ini_options]
+filterwarnings =[
+    "ignore:.*urllib3.*:UserWarning",
+    "ignore:.*chardet.*:UserWarning"
+]
+
+[tool.pylint.master]
+# Erlaubt Pylint, das in C geschriebene PyMuPDF (fitz) Modul zu analysieren
+extension-pkg-allow-list = ["fitz"]
+
+[tool.pylint.messages_control]
+disable =[
+    "line-too-long",
+    "too-many-locals",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-instance-attributes",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "too-few-public-methods",
+    "duplicate-code",
+    "import-error",
+    "import-outside-toplevel",
+    "broad-exception-caught",
+    "no-member",
+    "logging-fstring-interpolation",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-return-statements",
+    "redefined-outer-name",
+    "unnecessary-pass",
+    "unused-argument",
+    "subprocess-run-check"
+]

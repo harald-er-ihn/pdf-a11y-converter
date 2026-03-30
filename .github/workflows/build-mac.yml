@@ -4,6 +4,10 @@ on:
   # Erlaubt das manuelle Starten per Buttonklick im Browser
   workflow_dispatch: 
 
+env:
+  # 🚀 Unterdrückt die Warnung und nutzt direkt die moderne Node 24 Engine
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  
 jobs:
   build-mac:
     runs-on: macos-latest # Nutzt einen Apple Mac von GitHub

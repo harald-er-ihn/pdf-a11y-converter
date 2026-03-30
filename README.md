@@ -74,7 +74,25 @@ pip install -r requirements-dev.txt
 python cli.py eingabe.pdf -o ausgabe_pdfua.pdf -v
 ```
 
+### 🍏 Besonderer Hinweis für macOS-Nutzer (Apple Gatekeeper)
+
+Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. macOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. 
+
+Beim ersten Start erscheint daher möglicherweise die Meldung: *"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
+
+**Lösung 1 (Der Apple-Weg):**
+1. Mache einen **Rechtsklick** (oder Control-Klick) auf die App `PDF-A11y-GUI`.
+2. Klicke im Kontextmenü auf **"Öffnen"**.
+3. Bestätige den folgenden Sicherheitsdialog mit **"Trotzdem öffnen"**.
+*(Dies muss nur ein einziges Mal gemacht werden).*
+
+**Lösung 2 (Für Profis via Terminal):**
+Entferne das Apple-Quarantäne-Flag einfach manuell mit einem Befehl:
+`xattr -cr /Pfad/zum/entpackten/Ordner/PDF-A11y-GUI.app`
+Danach startet das Programm per normalem Doppelklick.
+
 ## ☕ Support & Spenden
 Dieses Projekt ist zu 100% Open-Source. Es gibt keine Paywalls und keinen versteckten Cloud-Zwang.
+
 © 2026 Dr. Harald Hutter
 

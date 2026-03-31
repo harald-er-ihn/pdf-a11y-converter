@@ -4,6 +4,7 @@
 """
 Build-Skript für den PDF A11y Converter.
 Kompiliert die Hauptanwendung (GUI & CLI) und richtet Worker ein.
+Integriert die LOKALE GTK3 Runtime für WeasyPrint unter Windows.
 """
 
 import os
@@ -38,6 +39,9 @@ build_targets = [
     {"script": "cli.py", "name": "PDF-A11y-CLI", "console": True},
 ]
 
+# Pfad zur lokalen GTK3-Runtime (für Windows)
+gtk_local_path = os.path.join(resources_path, "windows", "gtk3")
+
 for target in build_targets:
     print(f"\n⚙️ Kompiliere {target['name']}...")
 
@@ -49,8 +53,8 @@ for target in build_targets:
         f"--add-data={config_path}{SEP}config/",
         f"--add-data={static_path}{SEP}static/",
         f"--add-data={resources_path}{SEP}resources/",
-        f"--add-data=README.md{SEP}.",  # 🚀 FIX: README hinzugefügt
-        f"--add-data=ARCHITECTURE.md{SEP}.",  # 🚀 FIX: ARCHITECTURE hinzugefügt
+        f"--add-data=README.md{SEP}.",
+        f"--add-data=ARCHITECTURE.md{SEP}.",
         "--hidden-import=PIL._tkinter_finder",
         "--hidden-import=frontend",
         "--hidden-import=pymupdf",
@@ -58,6 +62,11 @@ for target in build_targets:
         "--exclude-module=tensorboard",
         "--noconfirm",
     ]
+
+    # Wenn wir auf Windows bauen und die lokale GTK3-Runtime existiert: Bündeln!
+    if sys.platform == "win32" and os.path.exists(gtk_local_path):
+        print("📦 Integriere lokale GTK3-Runtime für Windows...")
+        args.append(f"--add-data={gtk_local_path}{SEP}gtk3/")
 
     if not target["console"]:
         args.append("--noconsole")

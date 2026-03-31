@@ -18,6 +18,8 @@ Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige
 ### 🪟 Windows 11
 - [⬇️ Download PDF-A11y-Converter (Windows) .zip](https://tu-dortmund.sciebo.de/s/ijbi8cCZgHazMtr)
 - **SHA256:** `7a15f547b61f46cf8646540aa3e208e32c914b953f81cdd248cc642134c85905`
+> 💡 **Tipp zum Entpacken:** Da das Paket über 100.000 winzige KI-Bibliotheksdateien enthält, ist der Standard-Windows-Entpacker sehr langsam. Wir empfehlen dringend die Nutzung von **[7-Zip](https://www.7-zip.org/)**, um die Datei in wenigen Sekunden zu entpacken.
+
 
 ### 🍎 macOS (Apple Silicon & Intel)
 - [⬇️ Download PDF-A11y-Converter (macOS) .zip](https://tu-dortmund.sciebo.de/s/GqCmHs7PK9pwKFr)

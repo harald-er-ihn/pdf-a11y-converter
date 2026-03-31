@@ -6,10 +6,22 @@
 Kommandozeilen-Interface (CLI) für den PDF A11y Converter.
 """
 
-import argparse
-import logging
 import os
 import sys
+import platform
+
+# 🚀 FIX: GTK3 Runtime für WeasyPrint (Windows Standalone) dynamisch laden
+# MUSS ganz oben stehen, bevor WeasyPrint importiert wird!
+if platform.system().lower() == "windows":
+    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+    if os.path.exists(gtk3_bin):
+        os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(gtk3_bin)
+
+import argparse
+import logging
 import warnings
 from pathlib import Path
 

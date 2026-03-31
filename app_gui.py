@@ -8,12 +8,23 @@ Implementiert saubere Threading-Isolation, Stream-Redirection
 und eine responsive CustomTkinter Oberfläche.
 """
 
+import os
+import sys
+import platform
+
+# 🚀 FIX: GTK3 Runtime für WeasyPrint (Windows Standalone) dynamisch laden
+# MUSS ganz oben stehen, bevor WeasyPrint importiert wird!
+if platform.system().lower() == "windows":
+    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+    if os.path.exists(gtk3_bin):
+        os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(gtk3_bin)
+
 import logging
 import multiprocessing
-import os
-import platform
 import subprocess
-import sys
 import threading
 import warnings
 import webbrowser
@@ -435,7 +446,6 @@ class App(CustomTkDnD):
 
             vsr_html = p_path.with_suffix(".visualscreenreader.html")
 
-            # 🚀 DIREKTER AUFRUF der nackten, physischen PDF-Wahrheit!
             success = generate_physical_vsr(p_path, vsr_html)
 
             if success:

@@ -5,6 +5,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONUTF8: "1" # 🚀 FIX: Zwingt Windows, Emojis im Terminal zu akzeptieren
+
 
 jobs:
   build-windows:

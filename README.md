@@ -4,8 +4,41 @@
 [![PDF/UA-1](https://img.shields.io/badge/compliance-PDF%2FUA--1-blue)](https://pdfa.org/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-**A fully local, AI-powered PDF/UA-1 reconstruction engine.**  
-*Architecture-focused. Privacy-first. Validator-backed.*
+**Eine autarke, KI-gestützte Lösung zur PDF/UA-1 Rekonstruktion.**  
+*Strikte Architektur. Absolute Datenhoheit. Integrierte Endabnahme.*
+
+---
+
+## 📥 Download (Standalone Versionen)
+
+Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige Pakete zur Verfügung. Da die integrierten KI-Modelle (PyTorch, YOLO, NLLB, etc.) für den lokalen Betrieb sehr groß sind, hosten wir die Pakete (ca. 3,5 GB) auf einem dedizierten High-Speed Cloud-Speicher der TU Dortmund.
+
+> 🔒 **Download-Passwort:** Aus Sicherheitsgründen erfordert der Universitäts-Server ein Passwort für den Download. Bitte nutze: **yBmqxDneq2**
+
+### 🪟 Windows 11
+- [⬇️ Download PDF-A11y-Converter (Windows) .zip](https://tu-dortmund.sciebo.de/s/ijbi8cCZgHazMtr)
+- **SHA256:** `7a15f547b61f46cf8646540aa3e208e32c914b953f81cdd248cc642134c85905`
+
+### 🍎 macOS (Apple Silicon & Intel)
+- [⬇️ Download PDF-A11y-Converter (macOS) .zip](https://tu-dortmund.sciebo.de/s/GqCmHs7PK9pwKFr)
+- **SHA256:** `b071f98561597bdd90348a9c44774f717b7a01329f0428cab7e2b2d80bea0b4d`
+
+<details>
+<summary><b>🍏 Besonderer Hinweis für macOS-Nutzer (Apple Gatekeeper)</b></summary>
+
+Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. macOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. Beim ersten Start erscheint daher möglicherweise die Meldung: *"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
+
+**Lösung 1 (Der Apple-Weg):**
+1. Mache einen **Rechtsklick** (oder Control-Klick) auf die App `PDF-A11y-GUI`.
+2. Klicke im Kontextmenü auf **"Öffnen"**.
+3. Bestätige den folgenden Sicherheitsdialog mit **"Trotzdem öffnen"**.
+*(Dies muss nur ein einziges Mal gemacht werden).*
+
+**Lösung 2 (Für Profis via Terminal):**
+Entferne das Apple-Quarantäne-Flag manuell mit einem Befehl:
+`xattr -cr /Pfad/zum/entpackten/Ordner/PDF-A11y-GUI.app`
+Danach startet das Programm per normalem Doppelklick.
+</details>
 
 ---
 
@@ -38,11 +71,10 @@ Das System bündelt die weltweit besten Open-Source-Technologien autonom in eige
 - **Layout & Struktur:** `docling` (IBM) und `marker-pdf`
 - **Tabellen-Präzision:** `pdfplumber` & `pandas`
 - **Wissenschaftliche Formeln:** `nougat-ocr` (Meta)
-- **Fußnoten & Zitationen:** `grobid` (Machine Learning für Bibliographien)
+- **Fußnoten & Zitate:** `grobid` (Machine Learning für Bibliographien)
 - **Bild-Beschreibungen (Alt-Texte):** `BLIP` (Salesforce) via HuggingFace
 - **Formulare & Vektoren:** `pikepdf`
 - **Tag-Generierung (Overlay):** `WeasyPrint`
-- **Bild-Beschreibungen (Alt-Texte):** `BLIP` (Salesforce)
 - **Handschriften & Signaturen:** `YOLOv8s` (Lokales Offline-Modell)
 - **i18n Sprach-Übersetzung:** `NLLB-200` (Meta) zur automatischen Übersetzung von KI-Bildbeschreibungen in die Dokumentsprache.
 
@@ -74,25 +106,11 @@ pip install -r requirements-dev.txt
 python cli.py eingabe.pdf -o ausgabe_pdfua.pdf -v
 ```
 
-### 🍏 Besonderer Hinweis für macOS-Nutzer (Apple Gatekeeper)
-
-Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. macOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. 
-
-Beim ersten Start erscheint daher möglicherweise die Meldung: *"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
-
-**Lösung 1 (Der Apple-Weg):**
-1. Mache einen **Rechtsklick** (oder Control-Klick) auf die App `PDF-A11y-GUI`.
-2. Klicke im Kontextmenü auf **"Öffnen"**.
-3. Bestätige den folgenden Sicherheitsdialog mit **"Trotzdem öffnen"**.
-*(Dies muss nur ein einziges Mal gemacht werden).*
-
-**Lösung 2 (Für Profis via Terminal):**
-Entferne das Apple-Quarantäne-Flag einfach manuell mit einem Befehl:
-`xattr -cr /Pfad/zum/entpackten/Ordner/PDF-A11y-GUI.app`
-Danach startet das Programm per normalem Doppelklick.
-
 ## ☕ Support & Spenden
 Dieses Projekt ist zu 100% Open-Source. Es gibt keine Paywalls und keinen versteckten Cloud-Zwang.
+
+Wenn dir dieses Tool die Arbeit erleichtert hat oder du die Weiterentwicklung unterstützen möchtest, freue ich mich über einen Kaffee:
+![alt text](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal&style=for-the-badge)
 
 © 2026 Dr. Harald Hutter
 

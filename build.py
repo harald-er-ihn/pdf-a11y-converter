@@ -52,8 +52,14 @@ def prepare_local_portable_python() -> Path:
     py_exe = staged_dir / "python.exe"
     
     if pip_script.exists():
-        subprocess.run([str(py_exe), str(pip_script)], check=True, stdout=subprocess.DEVNULL)
-        pip_script.unlink()  # Aufräumen, get-pip.py wird in der fertigen App nicht mehr gebraucht
+        # Installiert pip
+        subprocess.run([str(py_exe), str(pip_script)], check=True)
+        pip_script.unlink()
+        
+        # 🚀 FIX: Installiert setuptools & wheel zwingend in das Embeddable Python,
+        # da pip sonst beim Bauen von Quellcode-Paketen (z.B. für docling) crasht!
+        print("📦 Installiere Build-Tools (setuptools & wheel)...")
+        subprocess.run([str(py_exe), "-m", "pip", "install", "setuptools", "wheel"], check=True)
 
     return staged_dir
 
@@ -134,10 +140,10 @@ for target in build_targets:
                     shutil.copytree(portable_base, env_dir)
                     py_exe = env_dir / "python.exe"
                     
+                    # DEVNULL entfernt -> Wir wollen die Logs bei Fehlern sehen!
                     subprocess.run(
                         [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
-                        check=True,
-                        stdout=subprocess.DEVNULL,
+                        check=True
                     )
                 else:
                     # Linux/Mac Variante (Klassisches Venv)
@@ -147,12 +153,11 @@ for target in build_targets:
                     
                     subprocess.run(
                         [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
-                        check=False,
+                        check=False
                     )
                     subprocess.run(
                         [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
-                        check=True,
-                        stdout=subprocess.DEVNULL,
+                        check=True
                     )
 
 print("\n🎉 Dual-Build erfolgreich abgeschlossen!")

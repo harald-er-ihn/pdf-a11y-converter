@@ -10,13 +10,14 @@ import os
 import sys
 import platform
 
-# 🚀 FIX: GTK3 Runtime für WeasyPrint (Windows Standalone) dynamisch laden
-# MUSS ganz oben stehen, bevor WeasyPrint importiert wird!
+# 🚀 FIX: GTK3 Runtime + Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     gtk3_bin = os.path.join(base_path, "gtk3", "bin")
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
+        os.environ["GIO_USE_VFS"] = "local"
+        os.environ["FONTCONFIG_PATH"] = os.path.join(base_path, "gtk3", "etc", "fonts")
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(gtk3_bin)
 

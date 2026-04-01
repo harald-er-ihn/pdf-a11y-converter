@@ -4,7 +4,7 @@
 """
 Build-Skript für den PDF A11y Converter.
 Kompiliert die Hauptanwendung (GUI & CLI) und richtet Worker ein.
-Integriert die LOKALE GTK3 Runtime für WeasyPrint unter Windows.
+Erzeugt 100% portable Python-Umgebungen für Windows (Offline-Variante).
 """
 
 import os
@@ -28,6 +28,36 @@ config_path = os.path.abspath("config")
 static_path = os.path.abspath("static")
 resources_path = os.path.abspath("resources")
 
+
+def prepare_local_portable_python() -> Path:
+    """
+    Bereitet das lokale Python Embeddable Package für die Worker vor.
+    (100% Offline - kopiert aus resources/windows/python_embed)
+    """
+    base_embed = Path(resources_path) / "windows" / "python_embed"
+    staged_dir = Path("build/python_base")
+    
+    if staged_dir.exists() and (staged_dir / "python.exe").exists():
+        return staged_dir
+
+    if not base_embed.exists():
+        print(f"❌ KRITISCHER FEHLER: Lokales Portable Python fehlt unter {base_embed}")
+        sys.exit(1)
+
+    print(f"\n📦 Bereite lokales Portable Python aus {base_embed.name} vor...")
+    shutil.copytree(base_embed, staged_dir, dirs_exist_ok=True)
+
+    print("📦 Initialisiere pip im portablen Python (Offline)...")
+    pip_script = staged_dir / "get-pip.py"
+    py_exe = staged_dir / "python.exe"
+    
+    if pip_script.exists():
+        subprocess.run([str(py_exe), str(pip_script)], check=True, stdout=subprocess.DEVNULL)
+        pip_script.unlink()  # Aufräumen, get-pip.py wird in der fertigen App nicht mehr gebraucht
+
+    return staged_dir
+
+
 print("🚀 Starte PyInstaller Dual-Build-Prozess...")
 
 build_targets = [
@@ -39,7 +69,7 @@ build_targets = [
     {"script": "cli.py", "name": "PDF-A11y-CLI", "console": True},
 ]
 
-# Pfad zur lokalen GTK3-Runtime (für Windows)
+# Pfad zur lokalen GTK3-Runtime (für Windows WeasyPrint)
 gtk_local_path = os.path.join(resources_path, "windows", "gtk3")
 
 for target in build_targets:
@@ -63,7 +93,7 @@ for target in build_targets:
         "--noconfirm",
     ]
 
-    # Wenn wir auf Windows bauen und die lokale GTK3-Runtime existiert: Bündeln!
+    # GTK3 mit in die .exe packen (nur Windows)
     if sys.platform == "win32" and os.path.exists(gtk_local_path):
         print("📦 Integriere lokale GTK3-Runtime für Windows...")
         args.append(f"--add-data={gtk_local_path}{SEP}gtk3/")
@@ -73,7 +103,12 @@ for target in build_targets:
 
     PyInstaller.__main__.run(args)
 
-print("\n📂 Kopiere Worker-Skripte für beide Builds...")
+
+print("\n📂 Kopiere Worker-Skripte und baue isolierte Umgebungen...")
+
+# Einmalig Basis-Python vorbereiten (beschleunigt den Build massiv!)
+portable_base = prepare_local_portable_python() if sys.platform == "win32" else None
+
 for target in build_targets:
     dist_workers_dir = Path(f"dist/{target['name']}/workers")
     src_workers_dir = Path("workers")
@@ -83,37 +118,41 @@ for target in build_targets:
             src_workers_dir,
             dist_workers_dir,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("venv", ".venv", "__pycache__"),
+            ignore=shutil.ignore_patterns("venv", ".venv", "python_env", "__pycache__"),
         )
 
-        print(f"\n⚙️ Richte Venvs in {target['name']} ein...")
+        print(f"\n⚙️ Richte KI-Worker in {target['name']} ein...")
         for worker_dir in dist_workers_dir.iterdir():
             req_file = worker_dir / "requirements.txt"
 
             if worker_dir.is_dir() and req_file.exists():
-                print(f"  -> [{worker_dir.name}]")
-                venv_dir = worker_dir / "venv"
+                print(f"  -> Installiere [{worker_dir.name}]...")
 
-                subprocess.run(
-                    [sys.executable, "-m", "venv", str(venv_dir)], check=True
-                )
-
-                if sys.platform == "win32":
-                    py_exe = venv_dir / "Scripts" / "python.exe"
-                    pip_exe = venv_dir / "Scripts" / "pip.exe"
+                if sys.platform == "win32" and portable_base:
+                    # Windows Variante B (100% Portable Python)
+                    env_dir = worker_dir / "python_env"
+                    shutil.copytree(portable_base, env_dir)
+                    py_exe = env_dir / "python.exe"
+                    
+                    subprocess.run(
+                        [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
                 else:
+                    # Linux/Mac Variante (Klassisches Venv)
+                    venv_dir = worker_dir / "venv"
+                    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
                     py_exe = venv_dir / "bin" / "python"
-                    pip_exe = venv_dir / "bin" / "pip"
-
-                subprocess.run(
-                    [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
-                    check=False,
-                )
-
-                subprocess.run(
-                    [str(pip_exe), "install", "-r", str(req_file)],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                )
+                    
+                    subprocess.run(
+                        [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
+                        check=False,
+                    )
+                    subprocess.run(
+                        [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
 
 print("\n🎉 Dual-Build erfolgreich abgeschlossen!")

@@ -12,13 +12,17 @@ import os
 import sys
 import platform
 
-# 🚀 FIX: GTK3 Runtime für WeasyPrint (Windows Standalone) dynamisch laden
-# MUSS ganz oben stehen, bevor WeasyPrint importiert wird!
+# 🚀 FIX: GTK3 Runtime + Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     gtk3_bin = os.path.join(base_path, "gtk3", "bin")
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
+        # Unterdrückt die UWP (Microsoft Outlook/ScreenSketch) Warnungen
+        os.environ["GIO_USE_VFS"] = "local"
+        # Behebt den Fontconfig "No such file (null)" Error
+        os.environ["FONTCONFIG_PATH"] = os.path.join(base_path, "gtk3", "etc", "fonts")
+        
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(gtk3_bin)
 
@@ -51,10 +55,7 @@ ctk.set_default_color_theme("blue")
 
 
 def get_resource_path(relative_path: str) -> str:
-    """
-    Ermittelt den absoluten Pfad zur Ressource.
-    Berücksichtigt das PyInstaller _MEIPASS Verzeichnis.
-    """
+    """Ermittelt den absoluten Pfad zur Ressource."""
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base_path, relative_path)
 
@@ -68,12 +69,10 @@ class TextboxHandler(logging.Handler):
         self.app = master_app
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Übergibt den Log-Record an den Main-Thread."""
         msg = self.format(record)
         self.app.after(0, self._append_text, msg)
 
     def _append_text(self, msg: str) -> None:
-        """Fügt den Text thread-sicher in die Textbox ein."""
         self.textbox.configure(state="normal")
         if self.textbox.get("end-2c", "end-1c") != "\n":
             self.textbox.insert("end-1c", "\n")
@@ -91,12 +90,10 @@ class StreamRedirector:
         self.app = master_app
 
     def write(self, text: str) -> None:
-        """Schreibt den Stream-Input in die GUI."""
         if text:
             self.app.after(0, self._gui_write, text)
 
     def _gui_write(self, text: str) -> None:
-        """Thread-sicheres Schreiben in das UI-Element."""
         self.textbox.configure(state="normal")
         if "\r" in text:
             valid_text = text.split("\r")[-1].strip()
@@ -111,7 +108,7 @@ class StreamRedirector:
         self.app.update_idletasks()
 
     def flush(self) -> None:
-        """Erforderlich für das Stream-Interface."""
+        pass
 
 
 class CustomTkDnD(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -142,7 +139,6 @@ class App(CustomTkDnD):
         self.info_button.focus_set()
 
     def _setup_logging(self) -> None:
-        """Konfiguriert das systemweite Logging für die GUI."""
         logger = logging.getLogger("pdf-converter")
         logger.setLevel(logging.INFO)
         handler = TextboxHandler(self.log_textbox, self)
@@ -154,7 +150,6 @@ class App(CustomTkDnD):
         sys.stderr = StreamRedirector(self.log_textbox, self)  # type: ignore
 
     def _build_ui(self) -> None:
-        """Baut die visuelle Struktur der Anwendung auf."""
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", padx=20, pady=(10, 0))
 
@@ -246,7 +241,6 @@ class App(CustomTkDnD):
         self.log_textbox.pack(fill="both", expand=True, pady=(0, 10))
 
     def _populate_tab(self, tab: ctk.CTkFrame, path: str, fallback: str) -> None:
-        """Lädt eine Textdatei in einen Tabview-Reiter."""
         textbox = ctk.CTkTextbox(tab, font=ctk.CTkFont(family="Consolas", size=12))
         textbox.pack(fill="both", expand=True, padx=5, pady=5)
         content = fallback
@@ -266,7 +260,6 @@ class App(CustomTkDnD):
         textbox.configure(state="disabled")
 
     def open_about_window(self) -> None:
-        """Zeigt die Dokumentationen im Tabview-Pattern an."""
         about_win = ctk.CTkToplevel(self)
         about_win.title("Dokumentation & Hilfe")
         about_win.geometry("850x650")
@@ -287,7 +280,6 @@ class App(CustomTkDnD):
         )
 
     def open_hardware_check(self) -> None:
-        """Prüft die Hardware über das isolierte Worker-Venv."""
         cpu_name = platform.processor() or "Unbekannte CPU"
         cores = multiprocessing.cpu_count()
         has_gpu, gpu_name = False, ""
@@ -314,19 +306,16 @@ class App(CustomTkDnD):
         messagebox.showinfo("Hardware-Check", msg)
 
     def browse_file(self, _event: Any = None) -> None:
-        """Öffnet den File-Picker Dialog."""
         if not self.is_processing:
             path = filedialog.askopenfilename(filetypes=[("PDF Dateien", "*.pdf")])
             if path:
                 self._set_file(path)
 
     def handle_drop(self, event: Any) -> None:
-        """Behandelt das Drag & Drop Event."""
         if not self.is_processing:
             self._set_file(event.data.strip("{}"))
 
     def _set_file(self, path: str) -> None:
-        """Setzt die ausgewählte Datei und resettet den Zustand."""
         if not path.lower().endswith(".pdf"):
             messagebox.showerror("Fehler", "Bitte eine PDF-Datei wählen.")
             return
@@ -338,7 +327,6 @@ class App(CustomTkDnD):
         self.converted_output_path = None
 
     def start_conversion(self) -> None:
-        """Startet den Thread für die Konvertierung."""
         if not self.selected_file:
             return
 
@@ -354,7 +342,6 @@ class App(CustomTkDnD):
         threading.Thread(target=self._run_phase_1, args=(self.selected_file,)).start()
 
     def _run_phase_1(self, input_path: str) -> None:
-        """Führt die Datenextraktion und Preflight-Analyse durch."""
         logger = logging.getLogger("pdf-converter")
         if not self._verapdf_version_logged:
             logger.info("🛠️ Validierungs-Software: %s", get_verapdf_version())
@@ -378,7 +365,6 @@ class App(CustomTkDnD):
     def _run_phase_3(
         self, spatial_dom: dict, images: dict, doc_lang: str, docinfo: dict
     ) -> None:
-        """Generiert das finale PDF und validiert es."""
         if not self.selected_file:
             return
 
@@ -396,7 +382,6 @@ class App(CustomTkDnD):
             self.after(0, self._finish, False, str(e))
 
     def _cancel_process(self, msg: str) -> None:
-        """Bricht den GUI-Zustand sauber ab."""
         self.is_processing = False
         self.progressbar.stop()
         self.progressbar.pack_forget()
@@ -405,7 +390,6 @@ class App(CustomTkDnD):
         self.status_label.configure(text=msg, text_color="orange")
 
     def _finish(self, success: bool, output_path: str) -> None:
-        """Schließt die Konvertierung in der GUI ab."""
         self.is_processing = False
         self.progressbar.stop()
         self.progressbar.pack_forget()
@@ -419,7 +403,6 @@ class App(CustomTkDnD):
             self.status_label.configure(text="Fehler", text_color="red")
 
     def show_visual_screenreader(self) -> None:
-        """Startet den Visual Screenreader Workflow."""
         if self.is_processing:
             messagebox.showinfo("Info", "Konvertierung läuft noch...")
             return
@@ -436,7 +419,6 @@ class App(CustomTkDnD):
         threading.Thread(target=self._run_vsr_thread, args=(target_pdf,)).start()
 
     def _run_vsr_thread(self, pdf_path: str) -> None:
-        """Führt das physische VSR Parsing im Hintergrund aus."""
         logger = logging.getLogger("pdf-converter")
         self.after(0, lambda: self.vsr_button.configure(state="disabled"))
 

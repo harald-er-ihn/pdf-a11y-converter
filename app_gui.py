@@ -20,8 +20,12 @@ if platform.system().lower() == "windows":
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
         # Unterdrückt die UWP (Microsoft Outlook/ScreenSketch) Warnungen
         os.environ["GIO_USE_VFS"] = "local"
+        os.environ["G_MESSAGES_DEBUG"] = ""
+        
         # Behebt den Fontconfig "No such file (null)" Error
-        os.environ["FONTCONFIG_PATH"] = os.path.join(base_path, "gtk3", "etc", "fonts")
+        fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
+        os.environ["FONTCONFIG_PATH"] = fc_path
+        os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
         
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(gtk3_bin)
@@ -40,7 +44,6 @@ import customtkinter as ctk
 from PIL import Image
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-# Backend-Importe
 from src.engine import extract_to_spatial
 from src.generator import generate_pdf_from_spatial
 from src.validation import check_verapdf, get_verapdf_version
@@ -271,7 +274,7 @@ class App(CustomTkDnD):
         self._populate_tab(
             tabview.add("Über"), "static/docs/about.txt", "PDF A11y Converter"
         )
-        self._populate_tab(tabview.add("README"), "README.md", "README nicht gefunden.")
+        self._populate_tab(tabview.add("README"), "README.md", "README fehlt.")
         self._populate_tab(
             tabview.add("Architektur"), "ARCHITECTURE.md", "Architektur fehlt."
         )
@@ -286,7 +289,11 @@ class App(CustomTkDnD):
 
         try:
             py_exe = get_worker_python("vision_worker")
-            script = "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+            script = (
+                "import torch; print(torch.cuda.is_available()); "
+                "print(torch.cuda.get_device_name(0) if torch.cuda.is_available() "
+                "else '')"
+            )
             res = subprocess.run(
                 [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
             )
@@ -299,7 +306,7 @@ class App(CustomTkDnD):
             pass
 
         if has_gpu:
-            msg = f"✅ Grafikkarte (GPU) aktiv: {gpu_name}\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
+            msg = f"✅ GPU aktiv: {gpu_name}\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
         else:
             msg = f"❌ Keine GPU (CPU-Modus).\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
 
@@ -427,7 +434,6 @@ class App(CustomTkDnD):
             logger.info("📄 Analysiere physischen Tag-Baum von %s...", p_path.name)
 
             vsr_html = p_path.with_suffix(".visualscreenreader.html")
-
             success = generate_physical_vsr(p_path, vsr_html)
 
             if success:

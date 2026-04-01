@@ -5,6 +5,8 @@
 
 import logging
 import platform
+import sys
+from pathlib import Path
 
 from src.config import get_resource_path
 
@@ -16,11 +18,19 @@ def get_verapdf_path() -> str | None:
     system = platform.system().lower()
     script_name = "verapdf.bat" if system == "windows" else "verapdf"
 
-    # 🚀 FIX: Greift exakt auf den Ordner resources/verapdf/ zu
+    # 1. Standard-Prüfung (Integrierte Ressourcen / _MEIPASS)
     script_path = get_resource_path(f"resources/verapdf/{script_name}")
-
     if script_path.exists() and script_path.is_file():
         return str(script_path)
 
-    logger.error("❌ veraPDF Start-Skript nicht gefunden: %s", script_path)
+    # 2. 🚀 Fallback für Standalone-Betrieb (Neben der .exe)
+    base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    fallback_path = base_dir / "resources" / "verapdf" / script_name
+
+    if fallback_path.exists() and fallback_path.is_file():
+        return str(fallback_path)
+
+    logger.error("❌ veraPDF Start-Skript nicht gefunden.")
+    logger.error("   Gesucht in: %s", script_path)
+    logger.error("   Fallback:   %s", fallback_path)
     return None

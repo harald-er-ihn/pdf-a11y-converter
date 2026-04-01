@@ -16,8 +16,15 @@ if platform.system().lower() == "windows":
     gtk3_bin = os.path.join(base_path, "gtk3", "bin")
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
+        # Unterdrückt die UWP (Microsoft Outlook/ScreenSketch) Warnungen
         os.environ["GIO_USE_VFS"] = "local"
-        os.environ["FONTCONFIG_PATH"] = os.path.join(base_path, "gtk3", "etc", "fonts")
+        os.environ["G_MESSAGES_DEBUG"] = ""
+        
+        # Behebt den Fontconfig "No such file (null)" Error
+        fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
+        os.environ["FONTCONFIG_PATH"] = fc_path
+        os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
+        
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(gtk3_bin)
 

@@ -17,34 +17,37 @@ logger = logging.getLogger("pdf-converter")
 
 
 def _get_app_base_dir() -> Path:
-    """Ermittelt das echte Basisverzeichnis der App (Skript oder kompiliert)."""
+    """Ermittelt das Basisverzeichnis der App (Skript oder kompiliert)."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
 
 def get_resource_path(relative_path: str) -> Path:
-    """Ermittelt den Pfad für PyInstaller-gebündelte Ressourcen (_MEIPASS)."""
+    """Ermittelt den Pfad für PyInstaller-gebündelte Ressourcen."""
     base_path = Path(getattr(sys, "_MEIPASS", Path.cwd()))
     return base_path / relative_path
 
 
 def get_worker_python(worker_name: str) -> Path:
-    """Sucht den Python-Interpreter des jeweiligen isolierten Workers."""
+    """Sucht den Python-Interpreter des isolierten Workers."""
     base_dir = _get_app_base_dir()
-    
+
     if sys.platform == "win32":
-        # 🚀 Variante B: Zuerst nach Portable Python suchen
         py_exe = base_dir / "workers" / worker_name / "python_env" / "python.exe"
         if not py_exe.exists():
-            # Fallback (für lokale Entwicklung)
             py_exe = base_dir / "workers" / worker_name / "venv" / "Scripts" / "python.exe"
     else:
-        # Mac und Linux nutzen weiterhin normale Venvs
         py_exe = base_dir / "workers" / worker_name / "venv" / "bin" / "python"
 
     if not py_exe.exists():
-        logger.warning("Worker-Python nicht gefunden: %s. Nutze System-Python.", py_exe)
+        if getattr(sys, "frozen", False):
+            # 🚀 FIX: Nie die .exe als Fallback nutzen!
+            raise FileNotFoundError(
+                f"Portable Python fehlt für {worker_name}! "
+                f"Gesucht unter: {py_exe}"
+            )
+        logger.warning("Nutze System-Python für %s.", worker_name)
         return Path(sys.executable)
 
     return py_exe

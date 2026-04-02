@@ -9,6 +9,7 @@ Implementiert das Blackboard-Pattern und die Sensor-Fusion (Merge-Phase).
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -102,15 +103,12 @@ class SemanticOrchestrator:
         self.temp_dir = self.base_dir / "temp" / "jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def _run_worker(
-        self, worker_name: str, script_name: str, args: List[str]
-    ) -> bool:
+    def _run_worker(self, worker_name: str, script_name: str, args: List[str]) -> bool:
         """Führt einen isolierten Worker aus."""
         script_path = self.workers_dir / worker_name / script_name
         if not script_path.exists():
             return False
 
-        # 🚀 FIX: Zentrales get_worker_python verwenden!
         try:
             py_exe = get_worker_python(worker_name)
         except FileNotFoundError as e:
@@ -119,8 +117,18 @@ class SemanticOrchestrator:
 
         cmd = [str(py_exe), str(script_path)]
         cmd.extend(args)
+
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            # 🚀 FIX: ENV und CWD explizit setzen, damit GTK/Workers nicht crashen
+            env = os.environ.copy()
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(self.base_dir),
+            )
             return True
         except subprocess.CalledProcessError as e:
             logger.error(
@@ -128,7 +136,11 @@ class SemanticOrchestrator:
                 worker_name,
                 e.returncode,
             )
-            logger.debug(e.stderr)
+            # 🚀 FIX: Fehler direkt in die Konsole / ins Log schreiben!
+            err_msg = e.stderr.strip() if e.stderr else "Kein Error-Log verfügbar."
+            logger.error(
+                "--- WORKER ERROR LOG ---\n%s\n------------------------", err_msg
+            )
             return False
 
     def _assign_alt_texts_to_dom(
@@ -180,11 +192,7 @@ class SemanticOrchestrator:
         with open(in_json, "w", encoding="utf-8") as f:
             json.dump(texts_to_translate, f, ensure_ascii=False, indent=2)
 
-        args = [
-            "--input", str(in_json),
-            "--output", str(out_json),
-            "--lang", doc_lang
-        ]
+        args = ["--input", str(in_json), "--output", str(out_json), "--lang", doc_lang]
 
         logger.info("▶ Starte Spezialist: 'translation_worker'...")
         if self._run_worker("translation_worker", "run_translation.py", args):

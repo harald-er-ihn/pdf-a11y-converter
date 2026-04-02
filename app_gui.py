@@ -12,23 +12,30 @@ import os
 import sys
 import platform
 
-# 🚀 FIX: GTK3 Runtime + Warnungs-Unterdrückung für Windows
+# 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
-        # Unterdrückt die UWP (Microsoft Outlook/ScreenSketch) Warnungen
+
+        # 🚀 BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
-        os.environ["G_MESSAGES_DEBUG"] = ""
-        
+        os.environ["GIO_MODULE_DIR"] = " "
+        os.environ["G_MESSAGES_DEBUG"] = "none"
+
         # Behebt den Fontconfig "No such file (null)" Error
         fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
-        os.environ["FONTCONFIG_PATH"] = fc_path
-        os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
-        
+        if os.path.exists(fc_path):
+            os.environ["FONTCONFIG_PATH"] = fc_path
+            os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
+
         if hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(gtk3_bin)
+            try:
+                os.add_dll_directory(gtk3_bin)
+            except Exception:
+                pass
 
 import logging
 import multiprocessing
@@ -179,16 +186,9 @@ class App(CustomTkDnD):
             width=160,
             command=self.show_visual_screenreader,
         )
-        self.hw_button = ctk.CTkButton(
-            btn_frame,
-            text="⚙️ Hardware-Check",
-            width=140,
-            command=self.open_hardware_check,
-        )
 
         self.info_button.pack(side="right", padx=(10, 0))
         self.vsr_button.pack(side="right", padx=(10, 0))
-        self.hw_button.pack(side="right", padx=(10, 0))
 
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -244,6 +244,7 @@ class App(CustomTkDnD):
         self.log_textbox.pack(fill="both", expand=True, pady=(0, 10))
 
     def _populate_tab(self, tab: ctk.CTkFrame, path: str, fallback: str) -> None:
+        """Füllt ein statisches Text-Tab aus einer Datei."""
         textbox = ctk.CTkTextbox(tab, font=ctk.CTkFont(family="Consolas", size=12))
         textbox.pack(fill="both", expand=True, padx=5, pady=5)
         content = fallback
@@ -261,6 +262,56 @@ class App(CustomTkDnD):
 
         textbox.insert("1.0", content)
         textbox.configure(state="disabled")
+
+    def _get_hardware_info(self) -> str:
+        """Ermittelt die Hardware-Daten synchron (wird von Thread aufgerufen)."""
+        cpu_name = platform.processor() or "Unbekannte CPU"
+        cores = multiprocessing.cpu_count()
+        has_gpu, gpu_name = False, ""
+
+        try:
+            py_exe = get_worker_python("vision_worker")
+            script = (
+                "import torch; print(torch.cuda.is_available()); "
+                "print(torch.cuda.get_device_name(0) "
+                "if torch.cuda.is_available() else '')"
+            )
+            res = subprocess.run(
+                [str(py_exe), "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            output = res.stdout.strip().split("\n")
+
+            if output and output[0] == "True":
+                has_gpu = True
+                gpu_name = output[1] if len(output) > 1 else "Unbekannte GPU"
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+        if has_gpu:
+            return f"✅ GPU aktiv: {gpu_name}\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
+        return f"❌ Keine GPU (CPU-Modus).\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
+
+    def _populate_hw_tab(self, tab: ctk.CTkFrame) -> None:
+        """Füllt den Hardware-Tab asynchron mit Daten."""
+        textbox = ctk.CTkTextbox(tab, font=ctk.CTkFont(family="Consolas", size=12))
+        textbox.pack(fill="both", expand=True, padx=5, pady=5)
+        textbox.insert("1.0", "Ermittle Hardware-Infos...\nBitte warten.")
+        textbox.configure(state="disabled")
+
+        def _apply_text(tb: ctk.CTkTextbox, text: str) -> None:
+            tb.configure(state="normal")
+            tb.delete("1.0", "end")
+            tb.insert("1.0", text)
+            tb.configure(state="disabled")
+
+        def _update_info() -> None:
+            info = self._get_hardware_info()
+            self.after(0, _apply_text, textbox, info)
+
+        threading.Thread(target=_update_info, daemon=True).start()
 
     def open_about_window(self) -> None:
         about_win = ctk.CTkToplevel(self)
@@ -281,36 +332,7 @@ class App(CustomTkDnD):
         self._populate_tab(
             tabview.add("Lizenzen"), "static/docs/licenses.txt", "Lizenzen fehlen."
         )
-
-    def open_hardware_check(self) -> None:
-        cpu_name = platform.processor() or "Unbekannte CPU"
-        cores = multiprocessing.cpu_count()
-        has_gpu, gpu_name = False, ""
-
-        try:
-            py_exe = get_worker_python("vision_worker")
-            script = (
-                "import torch; print(torch.cuda.is_available()); "
-                "print(torch.cuda.get_device_name(0) if torch.cuda.is_available() "
-                "else '')"
-            )
-            res = subprocess.run(
-                [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
-            )
-            output = res.stdout.strip().split("\n")
-
-            if output and output[0] == "True":
-                has_gpu = True
-                gpu_name = output[1] if len(output) > 1 else "Unbekannte GPU"
-        except Exception:
-            pass
-
-        if has_gpu:
-            msg = f"✅ GPU aktiv: {gpu_name}\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
-        else:
-            msg = f"❌ Keine GPU (CPU-Modus).\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
-
-        messagebox.showinfo("Hardware-Check", msg)
+        self._populate_hw_tab(tabview.add("Hardware"))
 
     def browse_file(self, _event: Any = None) -> None:
         if not self.is_processing:

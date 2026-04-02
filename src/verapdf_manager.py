@@ -23,8 +23,10 @@ def get_verapdf_path() -> str | None:
     if script_path.exists() and script_path.is_file():
         return str(script_path)
 
-    # 2. 🚀 Fallback für Standalone-Betrieb (Neben der .exe)
-    base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    # 2. Fallback für Standalone-Betrieb (Neben der .exe)
+    base_dir = (
+        Path(sys.executable).parent if getattr(sys, "frozen", False) else Path.cwd()
+    )
     fallback_path = base_dir / "resources" / "verapdf" / script_name
 
     if fallback_path.exists() and fallback_path.is_file():
@@ -33,4 +35,7 @@ def get_verapdf_path() -> str | None:
     logger.error("❌ veraPDF Start-Skript nicht gefunden.")
     logger.error("   Gesucht in: %s", script_path)
     logger.error("   Fallback:   %s", fallback_path)
+    logger.error(
+        "💡 TIPP: Hast du veraPDF heruntergeladen und in 'resources/verapdf/' entpackt, bevor du den Build gestartet hast?"
+    )
     return None

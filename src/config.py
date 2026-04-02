@@ -36,7 +36,9 @@ def get_worker_python(worker_name: str) -> Path:
     if sys.platform == "win32":
         py_exe = base_dir / "workers" / worker_name / "python_env" / "python.exe"
         if not py_exe.exists():
-            py_exe = base_dir / "workers" / worker_name / "venv" / "Scripts" / "python.exe"
+            py_exe = (
+                base_dir / "workers" / worker_name / "venv" / "Scripts" / "python.exe"
+            )
     else:
         py_exe = base_dir / "workers" / worker_name / "venv" / "bin" / "python"
 
@@ -44,8 +46,7 @@ def get_worker_python(worker_name: str) -> Path:
         if getattr(sys, "frozen", False):
             # 🚀 FIX: Nie die .exe als Fallback nutzen!
             raise FileNotFoundError(
-                f"Portable Python fehlt für {worker_name}! "
-                f"Gesucht unter: {py_exe}"
+                f"Portable Python fehlt für {worker_name}! Gesucht unter: {py_exe}"
             )
         logger.warning("Nutze System-Python für %s.", worker_name)
         return Path(sys.executable)

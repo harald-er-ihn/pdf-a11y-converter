@@ -21,7 +21,7 @@ else
 fi
 
 echo -e "\n🚀 Starte djlint..."| tee -a "$LOGFILE"
-if djlint . --reformat --quiet; then
+if djlint . --reformat --quiet --exclude resources ; then
     echo "✅ djlint erfolgreich abgeschlossen!"| tee -a "$LOGFILE"
 else
     echo "⚠️ Fehler bei djlint."| tee -a "$LOGFILE"
@@ -34,26 +34,30 @@ jq . config/nllb_mapping.json | tee -a "$LOGFILE"
 shellcheck -x ./tools/*.sh| tee -a "$LOGFILE"
 
 echo -e "\n🔍 Starte Code-Formatter (Ruff)..."| tee -a "$LOGFILE"
-ruff check . --fix| tee -a "$LOGFILE"
-ruff format .| tee -a "$LOGFILE"
 
+ruff check . --fix --exclude "resources" | tee -a "$LOGFILE"
+ruff format . --exclude "resources" | tee -a "$LOGFILE"
 echo -e "\n🔍 Starte Qualitätsprüfung (Pylint)..."| tee -a "$LOGFILE"
 
 confirm="Y"
 read -r -p "Continue? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
 
-
+# Für pylint:
 # Finde alle .py Dateien (ohne venvs) und übergebe sie an Pylint
 find . -type f -name "*.py" \
     -not -path "*/venv/*" \
     -not -path "*/.venv/*" \
     -not -path "*/build/*" \
     -not -path "*/dist/*" \
-    -not -path "*/.ruff_cache/*"  -exec pylint {} +| tee -a "$LOGFILE"
+    -not -path "*/.ruff_cache/*" \
+    -not -path "*/resources/*" -exec pylint {} + | tee -a "$LOGFILE"
+
+# Für radon:
 # Finde alle .py Dateien (ohne venvs) und übergebe sie an Radon
 find . -type f -name "*.py" \
     -not -path "*/venv/*" \
     -not -path "*/.venv/*" \
     -not -path "*/build/*" \
     -not -path "*/dist/*" \
-    -not -path "*/.ruff_cache/*"  -exec radon cc -s {} +| tee -a "$LOGFILE"
+    -not -path "*/.ruff_cache/*" \
+    -not -path "*/resources/*" -exec radon cc -s {} + | tee -a "$LOGFILE"

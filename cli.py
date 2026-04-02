@@ -10,23 +10,30 @@ import os
 import sys
 import platform
 
-# 🚀 FIX: GTK3 Runtime + Warnungs-Unterdrückung für Windows
+# 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
-        # Unterdrückt die UWP (Microsoft Outlook/ScreenSketch) Warnungen
+
+        # 🚀 BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
-        os.environ["G_MESSAGES_DEBUG"] = ""
-        
+        os.environ["GIO_MODULE_DIR"] = " "  # GIO Module komplett lahmlegen
+        os.environ["G_MESSAGES_DEBUG"] = "none"
+
         # Behebt den Fontconfig "No such file (null)" Error
         fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
-        os.environ["FONTCONFIG_PATH"] = fc_path
-        os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
-        
+        if os.path.exists(fc_path):
+            os.environ["FONTCONFIG_PATH"] = fc_path
+            os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
+
         if hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(gtk3_bin)
+            try:
+                os.add_dll_directory(gtk3_bin)
+            except Exception:
+                pass
 
 import argparse
 import logging

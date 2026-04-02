@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.config import get_resource_path
 from src.verapdf_manager import get_verapdf_path
+from src.jre_manager import get_java_paths
 
 logger = logging.getLogger("pdf-converter")
 
@@ -90,20 +91,25 @@ class VeraPDFValidator:
         os_folder = "macos" if self.system == "darwin" else self.system
         jre_dir = self.base_dir / os_folder / "jre"
 
+        # 1. Gebündeltes JRE prüfen
         if jre_dir.exists():
             for p in jre_dir.rglob(exe_name):
                 if "bin" in p.parts:
                     return p
+
+        # 2. 🚀 NEU: JRE Manager nutzen (Auto-Download in den Cache)
+        java_exe, _ = get_java_paths()
+        if java_exe and Path(java_exe).exists():
+            return Path(java_exe)
+
+        # 3. System-Fallback
         return Path(exe_name)
 
     def _build_classpath(self) -> str:
         bin_dir = self.verapdf_home / "bin"
         jars = list(bin_dir.glob("greenfield-apps-*.jar"))
-        return (
-            str(jars[0])
-            if jars
-            else str(self.base_dir / "verapdf" / "bin" / "greenfield-apps-1.28.2.jar")
-        )
+        fallback = self.base_dir / "verapdf" / "bin" / "greenfield-apps-1.28.2.jar"
+        return str(jars[0]) if jars else str(fallback)
 
     def get_configured_profiles(self) -> Dict[str, Path]:
         config_path = get_resource_path("config/config.json")
@@ -121,7 +127,7 @@ class VeraPDFValidator:
         return profiles
 
     def is_available(self) -> bool:
-        return self.java_cmd.exists()
+        return self.java_cmd.exists() or bool(get_verapdf_path())
 
     def _parse_validation_json(
         self, json_str: str, result: ValidationResult
@@ -160,7 +166,6 @@ class VeraPDFValidator:
     def _execute_verapdf(
         self, cmd: List[str], result: ValidationResult
     ) -> ValidationResult:
-        """Kapselt den Subprocess-Aufruf."""
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=120, check=False
@@ -190,7 +195,6 @@ class VeraPDFValidator:
         flavour: Optional[str] = None,
         profile_path: Optional[Path] = None,
     ) -> ValidationResult:
-        """Erzeugt den veraPDF Command-String und initiiert die Validierung."""
         pdf_path = Path(pdf_path)
         result = ValidationResult(passed=False)
 

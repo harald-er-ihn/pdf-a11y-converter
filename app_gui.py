@@ -7,6 +7,7 @@ Barriereoptimierte GUI für den PDF A11y Converter.
 Implementiert saubere Threading-Isolation, Stream-Redirection
 und eine responsive CustomTkinter Oberfläche.
 """
+# pylint: disable=wrong-import-position, invalid-name, broad-exception-caught
 
 import os
 import sys
@@ -14,19 +15,19 @@ import platform
 
 # 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
-    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+    BASE_PATH = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    gtk3_bin = os.path.join(BASE_PATH, "gtk3", "bin")
 
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
 
-        # 🚀 BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
+        # BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
         os.environ["GIO_MODULE_DIR"] = " "
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
         # Behebt den Fontconfig "No such file (null)" Error
-        fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
+        fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
         if os.path.exists(fc_path):
             os.environ["FONTCONFIG_PATH"] = fc_path
             os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
@@ -36,6 +37,7 @@ if platform.system().lower() == "windows":
                 os.add_dll_directory(gtk3_bin)
             except Exception:
                 pass
+
 
 import logging
 import multiprocessing
@@ -57,6 +59,7 @@ from src.validation import check_verapdf, get_verapdf_version
 from src.config import get_worker_python
 from src.vsr_generator import generate_physical_vsr
 
+
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
 warnings.filterwarnings("ignore", message=".*urllib3.*")
 
@@ -66,8 +69,8 @@ ctk.set_default_color_theme("blue")
 
 def get_resource_path(relative_path: str) -> str:
     """Ermittelt den absoluten Pfad zur Ressource."""
-    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    return os.path.join(base_path, relative_path)
+    app_base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(app_base_path, relative_path)
 
 
 class TextboxHandler(logging.Handler):
@@ -287,7 +290,7 @@ class App(CustomTkDnD):
             if output and output[0] == "True":
                 has_gpu = True
                 gpu_name = output[1] if len(output) > 1 else "Unbekannte GPU"
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:
             pass
 
         if has_gpu:

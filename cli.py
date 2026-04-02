@@ -5,6 +5,7 @@
 """
 Kommandozeilen-Interface (CLI) für den PDF A11y Converter.
 """
+# pylint: disable=wrong-import-position, invalid-name, broad-exception-caught
 
 import os
 import sys
@@ -12,19 +13,19 @@ import platform
 
 # 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
 if platform.system().lower() == "windows":
-    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    gtk3_bin = os.path.join(base_path, "gtk3", "bin")
+    BASE_PATH = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    gtk3_bin = os.path.join(BASE_PATH, "gtk3", "bin")
 
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
 
-        # 🚀 BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
+        # BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
         os.environ["GIO_MODULE_DIR"] = " "  # GIO Module komplett lahmlegen
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
         # Behebt den Fontconfig "No such file (null)" Error
-        fc_path = os.path.join(base_path, "gtk3", "etc", "fonts")
+        fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
         if os.path.exists(fc_path):
             os.environ["FONTCONFIG_PATH"] = fc_path
             os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
@@ -34,6 +35,7 @@ if platform.system().lower() == "windows":
                 os.add_dll_directory(gtk3_bin)
             except Exception:
                 pass
+
 
 import argparse
 import logging
@@ -45,12 +47,13 @@ from src.generator import generate_pdf_from_spatial
 from src.validation import check_verapdf, get_verapdf_version
 from src.vsr_generator import generate_physical_vsr
 
+
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
 warnings.filterwarnings("ignore", message=".*urllib3.*")
 
 
-def main() -> None:
-    """Haupteinstiegspunkt für die Ausführung über die Kommandozeile."""
+def _parse_args() -> argparse.Namespace:
+    """Extrahiert die Argumenten-Logik, um die Cyclomatic Complexity zu senken."""
     parser = argparse.ArgumentParser(
         description="PDF A11y Converter - Experten-Edition (CLI)",
         epilog="Beispiel: python cli.py dokument.pdf -o output.pdf -v",
@@ -97,11 +100,22 @@ def main() -> None:
         print(f"\n❌ Fehler: Datei nicht gefunden -> {args.input}\n")
         sys.exit(1)
 
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    return args
+
+
+def _setup_logger(verbose: bool) -> logging.Logger:
+    """Initialisiert das Logging."""
+    log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=log_level, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S"
     )
-    logger = logging.getLogger("pdf-converter")
+    return logging.getLogger("pdf-converter")
+
+
+def main() -> None:
+    """Haupteinstiegspunkt für die Ausführung über die Kommandozeile."""
+    args = _parse_args()
+    logger = _setup_logger(args.verbose)
 
     out_path = (
         Path(args.output)

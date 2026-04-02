@@ -6,6 +6,7 @@ Build-Skript für den PDF A11y Converter.
 Kompiliert die Hauptanwendung (GUI & CLI) und richtet Worker ein.
 Erzeugt 100% portable Python-Umgebungen für Windows (Offline-Variante).
 """
+# pylint: disable=broad-exception-caught
 
 import os
 import shutil
@@ -41,7 +42,7 @@ def prepare_local_portable_python() -> Path:
         return staged_dir
 
     if not base_embed.exists():
-        print(f"❌ KRITISCHER FEHLER: Lokales Portable Python fehlt unter {base_embed}")
+        print(f"❌ KRITISCHER FEHLER: Lokales Portable Python fehlt: {base_embed}")
         sys.exit(1)
 
     print(f"\n📦 Bereite lokales Portable Python aus {base_embed.name} vor...")
@@ -52,16 +53,12 @@ def prepare_local_portable_python() -> Path:
     py_exe = staged_dir / "python.exe"
 
     if pip_script.exists():
-        # Installiert pip
         subprocess.run([str(py_exe), str(pip_script)], check=True)
         pip_script.unlink()
 
-        # 🚀 FIX: Installiert setuptools & wheel zwingend in das Embeddable Python,
-        # da pip sonst beim Bauen von Quellcode-Paketen (z.B. für docling) crasht!
         print("📦 Installiere Build-Tools (setuptools & wheel)...")
-        subprocess.run(
-            [str(py_exe), "-m", "pip", "install", "setuptools", "wheel"], check=True
-        )
+        cmd = [str(py_exe), "-m", "pip", "install", "setuptools", "wheel"]
+        subprocess.run(cmd, check=True)
 
     return staged_dir
 
@@ -77,7 +74,6 @@ build_targets = [
     {"script": "cli.py", "name": "PDF-A11y-CLI", "console": True},
 ]
 
-# Pfad zur lokalen GTK3-Runtime (für Windows WeasyPrint)
 gtk_local_path = os.path.join(resources_path, "windows", "gtk3")
 
 for target in build_targets:
@@ -101,7 +97,6 @@ for target in build_targets:
         "--noconfirm",
     ]
 
-    # GTK3 mit in die .exe packen (nur Windows)
     if sys.platform == "win32" and os.path.exists(gtk_local_path):
         print("📦 Integriere lokale GTK3-Runtime für Windows...")
         args.append(f"--add-data={gtk_local_path}{SEP}gtk3/")
@@ -114,8 +109,7 @@ for target in build_targets:
 
 print("\n📂 Kopiere Worker-Skripte und baue isolierte Umgebungen...")
 
-# Einmalig Basis-Python vorbereiten (beschleunigt den Build massiv!)
-portable_base = prepare_local_portable_python() if sys.platform == "win32" else None
+PORTABLE_BASE = prepare_local_portable_python() if sys.platform == "win32" else None
 
 for target in build_targets:
     dist_workers_dir = Path(f"dist/{target['name']}/workers")
@@ -134,21 +128,28 @@ for target in build_targets:
             req_file = worker_dir / "requirements.txt"
 
             if worker_dir.is_dir() and req_file.exists():
-                print(f"  -> Installiere [{worker_dir.name}]...")
+                print(f"  -> Installiere[{worker_dir.name}]...")
 
-                if sys.platform == "win32" and portable_base:
-                    # Windows Variante B (100% Portable Python)
+                if sys.platform == "win32" and PORTABLE_BASE:
                     env_dir = worker_dir / "python_env"
-                    shutil.copytree(portable_base, env_dir)
+                    shutil.copytree(PORTABLE_BASE, env_dir)
+
+                    # 🚀 FIX: Sklearn DLLs direkt ins Venv kopieren!
+                    sklearn_dir = Path(resources_path) / "windows" / "sklearn"
+                    if sklearn_dir.exists():
+                        dll_dst = env_dir / "Lib" / "site-packages" / "sklearn"
+                        dll_dst = dll_dst / ".libs"
+                        dll_dst.mkdir(parents=True, exist_ok=True)
+                        for dll_file in sklearn_dir.glob("*.dll"):
+                            shutil.copy2(dll_file, dll_dst)
+
                     py_exe = env_dir / "python.exe"
 
-                    # DEVNULL entfernt -> Wir wollen die Logs bei Fehlern sehen!
                     subprocess.run(
                         [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
                         check=True,
                     )
                 else:
-                    # Linux/Mac Variante (Klassisches Venv)
                     venv_dir = worker_dir / "venv"
                     subprocess.run(
                         [sys.executable, "-m", "venv", str(venv_dir)], check=True

@@ -25,36 +25,50 @@ logger = logging.getLogger("pdf-converter")
 
 
 class RuleSummary(BaseModel):
+    """Pydantic Model für Regel-Zusammenfassungen."""
+
     clause: str = "Unbekannt"
     description: str = "Keine Beschreibung"
     failedChecks: int = 0
 
 
 class ValidationDetails(BaseModel):
+    """Pydantic Model für Validierungsdetails."""
+
     failedRules: int = 0
     ruleSummaries: List[RuleSummary] = Field(default_factory=list)
 
 
 class VeraValidationResult(BaseModel):
+    """Pydantic Model für das Gesamtergebnis."""
+
     compliant: bool = False
     details: Optional[ValidationDetails] = None
 
 
 class ItemDetails(BaseModel):
+    """Pydantic Model für Item-Details."""
+
     name: str = ""
 
 
 class Job(BaseModel):
+    """Pydantic Model für veraPDF Job."""
+
     itemDetails: Optional[ItemDetails] = None
     validationResult: List[VeraValidationResult] = Field(default_factory=list)
 
 
 class Report(BaseModel):
+    """Pydantic Model für den Report."""
+
     jobs: List[Job] = Field(default_factory=list)
     processingErrors: List[Dict] = Field(default_factory=list)
 
 
 class VeraPDFResponse(BaseModel):
+    """Pydantic Model für die veraPDF API Antwort."""
+
     report: Optional[Report] = None
 
 
@@ -68,6 +82,7 @@ class ValidationResult:
     report: Dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
+        """Wandelt Dataclass in Dict um."""
         return {"passed": self.passed, "errors": self.errors, "report": self.report}
 
 
@@ -77,41 +92,45 @@ class VeraPDFValidator:
     def __init__(self) -> None:
         self.base_dir = get_resource_path("resources")
         self.system = platform.system().lower()
+        # JRE ist OS-spezifisch
+        self.os_folder = "macos" if self.system == "darwin" else self.system
+
         self.java_cmd = self._get_java_path()
 
         script_path = get_verapdf_path()
-        self.verapdf_home = (
-            Path(script_path).parent if script_path else self.base_dir / "verapdf"
-        )
+        if script_path:
+            self.verapdf_home = Path(script_path).parent
+        else:
+            # 🚀 FIX: VeraPDF ist NICHT im OS-Ordner, sondern global!
+            self.verapdf_home = self.base_dir / "verapdf"
+
         self.classpath = self._build_classpath()
         self.main_class = "org.verapdf.apps.GreenfieldCliWrapper"
 
     def _get_java_path(self) -> Path:
         exe_name = "java.exe" if self.system == "windows" else "java"
-        os_folder = "macos" if self.system == "darwin" else self.system
-        jre_dir = self.base_dir / os_folder / "jre"
+        jre_dir = self.base_dir / self.os_folder / "jre"
 
-        # 1. Gebündeltes JRE prüfen
         if jre_dir.exists():
             for p in jre_dir.rglob(exe_name):
                 if "bin" in p.parts:
                     return p
 
-        # 2. 🚀 NEU: JRE Manager nutzen (Auto-Download in den Cache)
         java_exe, _ = get_java_paths()
         if java_exe and Path(java_exe).exists():
             return Path(java_exe)
 
-        # 3. System-Fallback
         return Path(exe_name)
 
     def _build_classpath(self) -> str:
         bin_dir = self.verapdf_home / "bin"
         jars = list(bin_dir.glob("greenfield-apps-*.jar"))
+        # 🚀 FIX: Fallback ebenfalls global anpassen!
         fallback = self.base_dir / "verapdf" / "bin" / "greenfield-apps-1.28.2.jar"
         return str(jars[0]) if jars else str(fallback)
 
     def get_configured_profiles(self) -> Dict[str, Path]:
+        """Lädt die Profile aus config.json."""
         config_path = get_resource_path("config/config.json")
         profiles = {}
         if config_path.exists():
@@ -122,11 +141,12 @@ class VeraPDFValidator:
                         res_path = get_resource_path(rel_path)
                         if res_path.exists():
                             profiles[key] = res_path
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning("Fehler config.json: %s", e)
         return profiles
 
     def is_available(self) -> bool:
+        """Prüft, ob Java und veraPDF da sind."""
         return self.java_cmd.exists() or bool(get_verapdf_path())
 
     def _parse_validation_json(
@@ -185,7 +205,7 @@ class VeraPDFValidator:
         except subprocess.TimeoutExpired:
             result.errors.append("veraPDF Timeout überschritten.")
             return result
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             result.errors.append(f"Systemfehler: {str(e)}")
             return result
 
@@ -195,6 +215,7 @@ class VeraPDFValidator:
         flavour: Optional[str] = None,
         profile_path: Optional[Path] = None,
     ) -> ValidationResult:
+        """Startet die veraPDF Überprüfung."""
         pdf_path = Path(pdf_path)
         result = ValidationResult(passed=False)
 
@@ -224,6 +245,7 @@ class VeraPDFValidator:
         return self._execute_verapdf(cmd, result)
 
     def get_version(self) -> str:
+        """Gibt die veraPDF Version zurück."""
         if not self.is_available():
             return "veraPDF nicht verfügbar"
         try:
@@ -240,7 +262,7 @@ class VeraPDFValidator:
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return res.stdout.strip().split("\n")[0]
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.debug("Konnte veraPDF-Version nicht abrufen: %s", e)
             return "veraPDF Version unbekannt"
 
@@ -249,6 +271,7 @@ _validator = VeraPDFValidator()
 
 
 def check_verapdf(pdf_path: Union[str, Path], is_final: bool = False) -> dict:
+    """Führt die Vorab-/Endabnahme durch."""
     phase = "Endabnahme" if is_final else "Eingangsprüfung"
     logger.info("🔍 %s für '%s' mit veraPDF...", phase, Path(pdf_path).name)
 
@@ -280,4 +303,5 @@ def check_verapdf(pdf_path: Union[str, Path], is_final: bool = False) -> dict:
 
 
 def get_verapdf_version() -> str:
+    """Zugriff auf die Versionsnummer."""
     return _validator.get_version()

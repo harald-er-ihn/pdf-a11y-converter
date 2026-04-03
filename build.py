@@ -57,7 +57,7 @@ def prepare_local_portable_python() -> Path:
         pip_script.unlink()
 
         print("📦 Installiere Build-Tools (setuptools & wheel)...")
-        cmd = [str(py_exe), "-m", "pip", "install", "setuptools", "wheel"]
+        cmd =[str(py_exe), "-m", "pip", "install", "setuptools", "wheel"]
         subprocess.run(cmd, check=True)
 
     return staged_dir
@@ -65,7 +65,7 @@ def prepare_local_portable_python() -> Path:
 
 print("🚀 Starte PyInstaller Dual-Build-Prozess...")
 
-build_targets = [
+build_targets =[
     {
         "script": "app_gui.py",
         "name": "PDF-A11y-GUI",
@@ -134,34 +134,34 @@ for target in build_targets:
                     env_dir = worker_dir / "python_env"
                     shutil.copytree(PORTABLE_BASE, env_dir)
 
-                    # 🚀 FIX: Sklearn DLLs direkt ins Venv kopieren!
+                    # 🚀 FIX: Sklearn C-Runtime DLLs perfekt verteilen!
                     sklearn_dir = Path(resources_path) / "windows" / "sklearn"
                     if sklearn_dir.exists():
-                        dll_dst = env_dir / "Lib" / "site-packages" / "sklearn"
-                        dll_dst = dll_dst / ".libs"
-                        dll_dst.mkdir(parents=True, exist_ok=True)
+                        libs_dst = env_dir / "Lib" / "site-packages" / "sklearn"
+                        libs_dst = libs_dst / ".libs"
+                        libs_dst.mkdir(parents=True, exist_ok=True)
+                        
                         for dll_file in sklearn_dir.glob("*.dll"):
-                            shutil.copy2(dll_file, dll_dst)
+                            # 1. In .libs (für hardcoded paths in sklearn)
+                            shutil.copy2(dll_file, libs_dst)
+                            # 2. In python_env (für Windows DLL dependency loading)
+                            shutil.copy2(dll_file, env_dir)
 
                     py_exe = env_dir / "python.exe"
 
-                    subprocess.run(
-                        [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
+                    subprocess.run([str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
                         check=True,
                     )
                 else:
                     venv_dir = worker_dir / "venv"
-                    subprocess.run(
-                        [sys.executable, "-m", "venv", str(venv_dir)], check=True
+                    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True
                     )
                     py_exe = venv_dir / "bin" / "python"
 
-                    subprocess.run(
-                        [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
+                    subprocess.run([str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
                         check=False,
                     )
-                    subprocess.run(
-                        [str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
+                    subprocess.run([str(py_exe), "-m", "pip", "install", "-r", str(req_file)],
                         check=True,
                     )
 

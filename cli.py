@@ -21,14 +21,27 @@ if platform.system().lower() == "windows":
 
         # BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
-        os.environ["GIO_MODULE_DIR"] = " "  # GIO Module komplett lahmlegen
+        os.environ["GIO_MODULE_DIR"] = " "
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
-        # Behebt den Fontconfig "No such file (null)" Error
+        # 🚀 BULLETPROOF FONTCONFIG FIX
         fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
         if os.path.exists(fc_path):
-            os.environ["FONTCONFIG_PATH"] = fc_path
-            os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
+            fc_path_unix = fc_path.replace("\\", "/")
+            os.environ["FONTCONFIG_PATH"] = fc_path_unix
+            
+            fonts_conf = os.path.join(fc_path, "fonts.conf")
+            if not os.path.exists(fonts_conf):
+                try:
+                    with open(fonts_conf, "w", encoding="utf-8") as f:
+                        f.write(
+                            '<?xml version="1.0"?><fontconfig>'
+                            '<dir>C:/Windows/Fonts</dir></fontconfig>'
+                        )
+                except Exception:
+                    pass
+                    
+            os.environ["FONTCONFIG_FILE"] = fc_path_unix + "/fonts.conf"
 
         if hasattr(os, "add_dll_directory"):
             try:
@@ -93,7 +106,7 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     if args.usage:
-        print("  python cli.py <eingabe.pdf> [-o <ausgabe.pdf>] [--visualscreenreader]")
+        print("  python cli.py <eingabe.pdf>[-o <ausgabe.pdf>] [--visualscreenreader]")
         sys.exit(0)
 
     if not args.input or not os.path.exists(args.input):
@@ -141,12 +154,10 @@ def main() -> None:
 
     spatial_dom, images, doc_lang, docinfo = extract_to_spatial(args.input)
 
-    # Zuerst das PDF rekonstruieren...
     generate_pdf_from_spatial(
         spatial_dom, args.input, images, str(out_path), docinfo, doc_lang
     )
 
-    # ... dann den fertigen Output-Baum als HTML ausgeben
     if args.visualscreenreader:
         vsr_path = (
             Path(args.visualscreenreader)

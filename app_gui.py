@@ -26,11 +26,24 @@ if platform.system().lower() == "windows":
         os.environ["GIO_MODULE_DIR"] = " "
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
-        # Behebt den Fontconfig "No such file (null)" Error
+        # 🚀 BULLETPROOF FONTCONFIG FIX
         fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
         if os.path.exists(fc_path):
-            os.environ["FONTCONFIG_PATH"] = fc_path
-            os.environ["FONTCONFIG_FILE"] = os.path.join(fc_path, "fonts.conf")
+            fc_path_unix = fc_path.replace("\\", "/")
+            os.environ["FONTCONFIG_PATH"] = fc_path_unix
+            
+            fonts_conf = os.path.join(fc_path, "fonts.conf")
+            if not os.path.exists(fonts_conf):
+                try:
+                    with open(fonts_conf, "w", encoding="utf-8") as f:
+                        f.write(
+                            '<?xml version="1.0"?><fontconfig>'
+                            '<dir>C:/Windows/Fonts</dir></fontconfig>'
+                        )
+                except Exception:
+                    pass
+                    
+            os.environ["FONTCONFIG_FILE"] = fc_path_unix + "/fonts.conf"
 
         if hasattr(os, "add_dll_directory"):
             try:
@@ -279,8 +292,7 @@ class App(CustomTkDnD):
                 "print(torch.cuda.get_device_name(0) "
                 "if torch.cuda.is_available() else '')"
             )
-            res = subprocess.run(
-                [str(py_exe), "-c", script],
+            res = subprocess.run([str(py_exe), "-c", script],
                 capture_output=True,
                 text=True,
                 timeout=10,

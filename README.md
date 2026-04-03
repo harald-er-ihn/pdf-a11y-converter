@@ -17,7 +17,7 @@ Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige
 
 ### 🪟 Windows 11
 - [⬇️ Download PDF-A11y-Converter (Windows) .zip](https://tu-dortmund.sciebo.de/s/ijbi8cCZgHazMtr)
-- **SHA256:** `ce3645a76621482ec09613a0c05d536ea86d41ec58d87077a0f66b07b8a8b6e3`
+- **SHA256:** `a1691a3b25a8985c4230b50ac8e095f962daebb56ec3cd00c3cbe582956e01fc`
 > 💡 **Tipp zum Entpacken:** Da das Paket über 100.000 winzige KI-Bibliotheksdateien enthält, ist der Standard-Windows-Entpacker sehr langsam. Wir empfehlen dringend die Nutzung von **[7-Zip](https://www.7-zip.org/)**, um die Datei in wenigen Sekunden zu entpacken.
 
 
@@ -112,6 +112,7 @@ python cli.py eingabe.pdf -o ausgabe_pdfua.pdf -v
 Dieses Projekt ist zu 100% Open-Source. Es gibt keine Paywalls und keinen versteckten Cloud-Zwang.
 
 Wenn dir dieses Tool die Arbeit erleichtert hat oder du die Weiterentwicklung unterstützen möchtest, freue ich mich über einen Kaffee:
+
 ![alt text](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal&style=for-the-badge)
 
 © 2026 Dr. Harald Hutter

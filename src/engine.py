@@ -2,9 +2,9 @@
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
-Der Semantic Orchestrator.
-Leitet die PDF-Analyse, ruft isolierte Worker-Prozesse auf und sammelt.
-Implementiert das Blackboard-Pattern und die Sensor-Fusion (Merge-Phase).
+Der Semantic Orchestrator (Enterprise Edition).
+Nutzt ein DAG-Framework und dynamische Plugins zur parallelen Ausführung
+der isolierten Worker-Prozesse. Führt die Sensor-Fusion (Merge-Phase) durch.
 """
 
 import json
@@ -14,18 +14,33 @@ import re
 import shutil
 import subprocess
 import uuid
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Dict, Tuple, List, Any
+from typing import Dict, Tuple, List, Any, Optional
 
 import pikepdf
 from PIL import Image
 
 from src.config import get_worker_python, _get_app_base_dir
+from src.infrastructure.dag_executor import DAGExecutor, DAGTask
 from src.pdf_diagnostics import PDFPreflightScanner
+from src.plugins.base import WorkerPlugin
+from src.plugins.plugin_loader import PluginLoader
 from src.repair import repair_spatial_dom
 from src.vision import get_image_descriptions
 
 logger = logging.getLogger("pdf-converter")
+
+
+@dataclass
+class ExtractionResult:
+    """DTO für die Rückgabe der Map & Reduce Phase (Sensor Fusion)."""
+
+    spatial_dom: Dict[str, Any]
+    images_dict: Dict[str, Tuple[Image.Image, str]]
+    doc_lang: str
+    original_meta: Dict[str, str]
 
 
 def _get_pdf_lang(input_path: Path) -> str:
@@ -95,7 +110,7 @@ def _is_inside(center_x: float, center_y: float, box: List[float]) -> bool:
 
 # pylint: disable=too-few-public-methods
 class SemanticOrchestrator:
-    """Orchestriert die isolierten Experten-Worker."""
+    """Orchestriert die Pipeline, lädt Plugins und führt die Sensor Fusion durch."""
 
     def __init__(self) -> None:
         self.base_dir = _get_app_base_dir()
@@ -103,23 +118,29 @@ class SemanticOrchestrator:
         self.temp_dir = self.base_dir / "temp" / "jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def _run_worker(self, worker_name: str, script_name: str, args: List[str]) -> bool:
-        """Führt einen isolierten Worker aus."""
-        script_path = self.workers_dir / worker_name / script_name
-        if not script_path.exists():
-            return False
-
+    def _run_plugin_task(
+        self,
+        plugin: WorkerPlugin,
+        input_pdf: Path,
+        job_dir: Path,
+        context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Führt ein Worker-Plugin isoliert aus (Graceful Degradation).
+        Kehrt bei Fehler mit None zurück, um den DAG nicht zu crashen.
+        """
         try:
-            py_exe = get_worker_python(worker_name)
+            py_exe = get_worker_python(plugin.name)
         except FileNotFoundError as e:
             logger.error(str(e))
-            return False
+            return None
 
-        cmd = [str(py_exe), str(script_path)]
-        cmd.extend(args)
+        # NEU: Das Skript und die Argumente sind nun sauber getrennt!
+        cmd_args = plugin.get_arguments(input_pdf, job_dir, context)
+        script_path = self.workers_dir / plugin.name / plugin.script_name
+        cmd = [str(py_exe), str(script_path)] + cmd_args
 
         try:
-            # 🚀 FIX: ENV und CWD explizit setzen, damit GTK/Workers nicht crashen
             env = os.environ.copy()
             subprocess.run(
                 cmd,
@@ -129,19 +150,27 @@ class SemanticOrchestrator:
                 env=env,
                 cwd=str(self.base_dir),
             )
-            return True
+
+            out_file = plugin.get_output_path(job_dir)
+            if out_file.exists():
+                with open(out_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            logger.warning("⚠️ Plugin '%s' lief durch, aber Output fehlt.", plugin.name)
+            return None
+
         except subprocess.CalledProcessError as e:
             logger.error(
-                "❌ Worker '%s' ist abgestürzt (Code %s).",
-                worker_name,
-                e.returncode,
+                "❌ Worker '%s' ist abgestürzt (Code %s).", plugin.name, e.returncode
             )
-            # 🚀 FIX: Fehler direkt in die Konsole / ins Log schreiben!
             err_msg = e.stderr.strip() if e.stderr else "Kein Error-Log verfügbar."
             logger.error(
                 "--- WORKER ERROR LOG ---\n%s\n------------------------", err_msg
             )
-            return False
+            return None
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("❌ Systemfehler beim Ausführen von %s: %s", plugin.name, e)
+            return None
 
     def _assign_alt_texts_to_dom(
         self,
@@ -194,8 +223,14 @@ class SemanticOrchestrator:
 
         args = ["--input", str(in_json), "--output", str(out_json), "--lang", doc_lang]
 
-        logger.info("▶ Starte Spezialist: 'translation_worker'...")
-        if self._run_worker("translation_worker", "run_translation.py", args):
+        try:
+            py_exe = get_worker_python("translation_worker")
+            script_path = self.workers_dir / "translation_worker" / "run_translation.py"
+            cmd = [str(py_exe), str(script_path)] + args
+
+            logger.info("▶ Starte Translation-Chain: 'translation_worker'...")
+            subprocess.run(cmd, check=True, capture_output=True, cwd=str(self.base_dir))
+
             if out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
                     trans_results = json.load(f)
@@ -203,15 +238,15 @@ class SemanticOrchestrator:
                 for img_name in list(images_dict.keys()):
                     if img_name in trans_results:
                         img_obj, _ = images_dict[img_name]
-                        images_dict[img_name] = (
-                            img_obj,
-                            trans_results[img_name],
-                        )
+                        images_dict[img_name] = (img_obj, trans_results[img_name])
 
                 for p_idx, e_idx, ref_key in dom_alt_refs:
                     if ref_key in trans_results:
                         el = spatial_dom["pages"][p_idx]["elements"][e_idx]
                         el["alt_text"] = trans_results[ref_key]
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Übersetzung übersprungen: %s", e)
 
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
@@ -228,7 +263,6 @@ class SemanticOrchestrator:
                     dom_page["elements"].extend(s_elements)
                     total_sigs += len(s_elements)
                     break
-
         if total_sigs > 0:
             logger.info("📝 %s Unterschrift(en) integriert.", total_sigs)
 
@@ -258,7 +292,6 @@ class SemanticOrchestrator:
                 dom_page["elements"].extend(t_elements)
                 total_tables += len(t_elements)
                 break
-
         if total_tables > 0:
             logger.info("📝 %s Tabellen integriert.", total_tables)
 
@@ -268,7 +301,6 @@ class SemanticOrchestrator:
         """Webt interaktive Formularfelder als Dummy-Elemente ein."""
         if not forms:
             return
-
         logger.info("📝 Verwebe %s Formularfelder...", len(forms))
         if spatial_dom.get("pages"):
             first_page = spatial_dom["pages"][0]
@@ -299,12 +331,10 @@ class SemanticOrchestrator:
                     cx = (b_box[0] + b_box[2]) / 2.0
                     cy = (b_box[1] + b_box[3]) / 2.0
 
-                    is_fn = any(_is_inside(cx, cy, f["bbox"]) for f in f_elements)
-                    if is_fn:
+                    if any(_is_inside(cx, cy, f["bbox"]) for f in f_elements):
                         base_el["type"] = "Note"
                         total_notes += 1
                 break
-
         if total_notes > 0:
             logger.info("📝 %s Textblöcke als Fußnote markiert.", total_notes)
 
@@ -352,7 +382,6 @@ class SemanticOrchestrator:
         """Lässt den Vision-Worker Alt-Texte generieren."""
         images_dict = {}
         image_paths = spatial_dom.get("images", {})
-
         if not image_paths:
             return images_dict
 
@@ -373,56 +402,47 @@ class SemanticOrchestrator:
 
         return images_dict
 
-    # pylint: disable=too-many-locals
-    def extract(
-        self, input_path: Path, doc_lang: str
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Führt die Orchestrierung via Blackboard-Pattern durch."""
+    def extract(self, input_path: Path, doc_lang: str) -> ExtractionResult:
+        """
+        Orchestriert die Map & Reduce Phase via DAG und Plugin-Framework.
+        Gibt die internen Daten als ExtractionResult DTO zurück.
+        """
         job_id = f"job_{uuid.uuid4().hex[:8]}"
         job_dir = self.temp_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        blackboard_results = {}
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
-        experts = [
-            ("layout_worker", "run_layout.py"),
-            ("table_worker", "run_tables.py"),
-            ("form_worker", "run_forms.py"),
-            ("formula_worker", "run_formula.py"),
-            ("footnote_worker", "run_footnote.py"),
-            ("signature_worker", "run_signatures.py"),
-        ]
+        context = {"lang": doc_lang, "force_ocr": diagnostics.force_ocr_extraction}
+        orig_meta = _extract_original_metadata(input_path)
 
-        # 1. MAP PHASE (Experten-Analyse)
-        for worker_name, script_name in experts:
-            target_json = job_dir / f"{worker_name}_result.json"
-            worker_args = ["--input", str(input_path), "--output", str(target_json)]
+        # 1. MAP PHASE (Dynamische Plugin-Ermittlung - STRING GEGEN CRASH)
+        plugins = PluginLoader.load_all(str(self.workers_dir))
+        dag_tasks = []
 
-            if diagnostics.force_ocr_extraction and worker_name == "layout_worker":
-                worker_args.append("--force-ocr")
+        for plugin in plugins:
+            action = partial(
+                self._run_plugin_task, plugin, input_path, job_dir, context
+            )
+            dag_tasks.append(
+                DAGTask(
+                    name=plugin.name, action=action, dependencies=plugin.dependencies
+                )
+            )
 
-            if worker_name == "table_worker":
-                worker_args.extend(["--lang", doc_lang])
+        # 2. PARALLEL EXECUTION (DAG)
+        executor = DAGExecutor(max_workers=4)
+        dag_results = executor.execute(dag_tasks)
 
-            logger.info("▶ Starte Spezialist: '%s'...", worker_name)
-            if (
-                self._run_worker(worker_name, script_name, worker_args)
-                and target_json.exists()
-            ):
-                with open(target_json, "r", encoding="utf-8") as f:
-                    blackboard_results[worker_name] = json.load(f)
-                logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker_name)
-            else:
-                logger.warning("⚠️ '%s' lieferte kein Ergebnis.", worker_name)
+        blackboard_results = {k: v for k, v in dag_results.items() if v is not None}
 
-        # 2. REDUCE PHASE (Sensor Fusion)
+        # 3. REDUCE PHASE (Sensor Fusion)
         if "layout_worker" not in blackboard_results:
             logger.error("❌ Der Layout-Basis-Worker ist fehlgeschlagen!")
             if logger.getEffectiveLevel() != logging.DEBUG:
                 shutil.rmtree(job_dir, ignore_errors=True)
-            return {}, {}
+            return ExtractionResult({}, {}, doc_lang, orig_meta)
 
         spatial_dom = blackboard_results["layout_worker"]
         spatial_dom["needs_visual_reconstruction"] = (
@@ -430,50 +450,49 @@ class SemanticOrchestrator:
         )
 
         if "signature_worker" in blackboard_results:
-            sig_pages = blackboard_results["signature_worker"].get("pages", [])
-            self._merge_signatures(spatial_dom, sig_pages)
-
+            self._merge_signatures(
+                spatial_dom, blackboard_results["signature_worker"].get("pages", [])
+            )
         if "table_worker" in blackboard_results:
-            tbl_pages = blackboard_results["table_worker"].get("pages", [])
-            self._merge_tables(spatial_dom, tbl_pages)
-
+            self._merge_tables(
+                spatial_dom, blackboard_results["table_worker"].get("pages", [])
+            )
         if "formula_worker" in blackboard_results:
             self._merge_formulas(spatial_dom, blackboard_results["formula_worker"])
-
         if "footnote_worker" in blackboard_results:
-            fn_pages = blackboard_results["footnote_worker"].get("pages", [])
-            self._merge_footnotes(spatial_dom, fn_pages)
-
+            self._merge_footnotes(
+                spatial_dom, blackboard_results["footnote_worker"].get("pages", [])
+            )
         if "form_worker" in blackboard_results:
-            frm_fields = blackboard_results["form_worker"].get("fields", [])
-            self._merge_forms(spatial_dom, frm_fields)
+            self._merge_forms(
+                spatial_dom, blackboard_results["form_worker"].get("fields", [])
+            )
 
+        # 4. TRANSLATION CHAIN
         images_dict = self._process_images(spatial_dom, job_dir)
-
-        # TRANSLATION PHASE
         self._translate_content(spatial_dom, images_dict, doc_lang, job_dir)
 
+        # 5. REPAIR & SANITIZATION
         spatial_dom = repair_spatial_dom(spatial_dom, input_path)
 
-        # 3. CLEANUP
         if logger.getEffectiveLevel() != logging.DEBUG:
             shutil.rmtree(job_dir, ignore_errors=True)
 
-        return spatial_dom, images_dict
+        return ExtractionResult(
+            spatial_dom=spatial_dom,
+            images_dict=images_dict,
+            doc_lang=doc_lang,
+            original_meta=orig_meta,
+        )
 
 
-def extract_to_spatial(
-    input_path: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, str]]:
-    """Haupt-Einstiegspunkt für die GUI/CLI."""
+def extract_to_spatial(input_path: str) -> ExtractionResult:
+    """Einstiegspunkt für die Application-Facade."""
     pdf_path = Path(input_path)
-    logger.info("✨ Starte Orchestrierung für %s...", pdf_path.name)
+    logger.info("✨ Starte parallele Orchestrierung (DAG) für %s...", pdf_path.name)
 
     doc_lang = _get_pdf_lang(pdf_path)
     logger.info("🗣️ Dokumenten-Sprache erkannt: %s", doc_lang)
 
     pipeline = SemanticOrchestrator()
-    spatial_dom, images_dict = pipeline.extract(pdf_path, doc_lang)
-    orig_meta = _extract_original_metadata(pdf_path)
-
-    return spatial_dom, images_dict, doc_lang, orig_meta
+    return pipeline.extract(pdf_path, doc_lang)

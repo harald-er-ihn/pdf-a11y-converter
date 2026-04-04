@@ -4,69 +4,26 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Kommandozeilen-Interface (CLI) für den PDF A11y Converter.
+Fungiert als reiner Controller, der den ConverterService aufruft.
 """
-# pylint: disable=wrong-import-position, invalid-name, broad-exception-caught
-
-import os
-import sys
-import platform
-
-# 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
-if platform.system().lower() == "windows":
-    BASE_PATH = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    gtk3_bin = os.path.join(BASE_PATH, "gtk3", "bin")
-
-    if os.path.exists(gtk3_bin):
-        os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
-
-        # BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
-        os.environ["GIO_USE_VFS"] = "local"
-        os.environ["GIO_MODULE_DIR"] = " "
-        os.environ["G_MESSAGES_DEBUG"] = "none"
-
-        # 🚀 BULLETPROOF FONTCONFIG FIX
-        fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
-        if os.path.exists(fc_path):
-            fc_path_unix = fc_path.replace("\\", "/")
-            os.environ["FONTCONFIG_PATH"] = fc_path_unix
-            
-            fonts_conf = os.path.join(fc_path, "fonts.conf")
-            if not os.path.exists(fonts_conf):
-                try:
-                    with open(fonts_conf, "w", encoding="utf-8") as f:
-                        f.write(
-                            '<?xml version="1.0"?><fontconfig>'
-                            '<dir>C:/Windows/Fonts</dir></fontconfig>'
-                        )
-                except Exception:
-                    pass
-                    
-            os.environ["FONTCONFIG_FILE"] = fc_path_unix + "/fonts.conf"
-
-        if hasattr(os, "add_dll_directory"):
-            try:
-                os.add_dll_directory(gtk3_bin)
-            except Exception:
-                pass
-
 
 import argparse
 import logging
+import os
+import sys
 import warnings
 from pathlib import Path
 
-from src.engine import extract_to_spatial
-from src.generator import generate_pdf_from_spatial
-from src.validation import check_verapdf, get_verapdf_version
+# 🚀 FIX: Korrekter Import-Pfad (Application Layer)
+from src.application.converter_service import ConverterService
 from src.vsr_generator import generate_physical_vsr
-
 
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
 warnings.filterwarnings("ignore", message=".*urllib3.*")
 
 
 def _parse_args() -> argparse.Namespace:
-    """Extrahiert die Argumenten-Logik, um die Cyclomatic Complexity zu senken."""
+    """Extrahiert die Argumenten-Logik."""
     parser = argparse.ArgumentParser(
         description="PDF A11y Converter - Experten-Edition (CLI)",
         epilog="Beispiel: python cli.py dokument.pdf -o output.pdf -v",
@@ -78,7 +35,7 @@ def _parse_args() -> argparse.Namespace:
         "-h", "--help", action="help", default=argparse.SUPPRESS, help="Zeigt Hilfe an."
     )
     group_info.add_argument(
-        "--usage", action="store_true", help="Zeigt ein Verwendungsbeispiel an."
+        "--usage", action="store_true", help="Zeigt Verwendungsbeispiel."
     )
     group_info.add_argument(
         "--version", action="version", version="PDF A11y Converter v0.1.0"
@@ -86,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
 
     group_args = parser.add_argument_group("Verarbeitung")
     group_args.add_argument("input", nargs="?", help="Pfad zur Eingabe-PDF")
-    group_args.add_argument("-o", "--output", help="Pfad zur Ausgabe-PDF (optional)")
+    group_args.add_argument("-o", "--output", help="Pfad zur Ausgabe-PDF")
 
     group_debug = parser.add_argument_group("Debugging")
     group_debug.add_argument(
@@ -106,7 +63,7 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     if args.usage:
-        print("  python cli.py <eingabe.pdf>[-o <ausgabe.pdf>] [--visualscreenreader]")
+        print("  python cli.py <in.pdf> [-o <out.pdf>] [--visualscreenreader]")
         sys.exit(0)
 
     if not args.input or not os.path.exists(args.input):
@@ -126,37 +83,26 @@ def _setup_logger(verbose: bool) -> logging.Logger:
 
 
 def main() -> None:
-    """Haupteinstiegspunkt für die Ausführung über die Kommandozeile."""
+    """Haupteinstiegspunkt für die Kommandozeile."""
     args = _parse_args()
     logger = _setup_logger(args.verbose)
 
+    in_path = Path(args.input)
     out_path = (
         Path(args.output)
         if args.output
-        else Path(args.input).with_name(Path(args.input).stem + "_pdfua.pdf")
+        else in_path.with_name(f"{in_path.stem}_pdfua.pdf")
     )
-    logger.info("🚀 Starte CLI Konvertierung für: %s", args.input)
 
-    verapdf_v = get_verapdf_version()
-    logger.info("🛠️ Validierungs-Software: %s", verapdf_v)
+    logger.info("🚀 Starte CLI Konvertierung für: %s", in_path.name)
 
-    initial_check = check_verapdf(args.input, is_final=False)
+    # Facade Pattern: Orchestrierung an Service Layer delegieren
+    service = ConverterService()
+    result = service.convert(in_path, out_path)
 
-    if initial_check.get("passed", False):
-        logger.info(
-            "🟢 Fazit: Das Original-PDF ist bereits konform. Verarbeite trotzdem..."
-        )
-    else:
-        logger.info(
-            "🔴 Fazit: Das Original-PDF ist NICHT barrierefrei. "
-            "Starte Rekonstruktion..."
-        )
-
-    spatial_dom, images, doc_lang, docinfo = extract_to_spatial(args.input)
-
-    generate_pdf_from_spatial(
-        spatial_dom, args.input, images, str(out_path), docinfo, doc_lang
-    )
+    if not result.success:
+        logger.error("🔴 Konvertierung fehlgeschlagen: %s", result.error_message)
+        sys.exit(1)
 
     if args.visualscreenreader:
         vsr_path = (
@@ -165,10 +111,8 @@ def main() -> None:
             else out_path.with_suffix(".visualscreenreader.html")
         )
 
-        logger.info("👁️ Generiere Visual Screenreader aus dem fertigen PDF/UA...")
-        success = generate_physical_vsr(out_path, vsr_path)
-
-        if success:
+        logger.info("👁️ Generiere Visual Screenreader...")
+        if generate_physical_vsr(out_path, vsr_path):
             logger.info("👉 file://%s", vsr_path.absolute())
         else:
             logger.warning("⚠️ Konnte keinen VSR generieren.")

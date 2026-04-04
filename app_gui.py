@@ -4,8 +4,9 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Barriereoptimierte GUI für den PDF A11y Converter.
-Implementiert saubere Threading-Isolation, Stream-Redirection
-und eine responsive CustomTkinter Oberfläche.
+Implementiert saubere Threading-Isolation (ThreadPoolExecutor) und
+nutzt das Facade-Pattern (ConverterService) zur strikten Trennung
+von UI und Business Logic.
 """
 # pylint: disable=wrong-import-position, invalid-name, broad-exception-caught
 
@@ -13,36 +14,33 @@ import os
 import sys
 import platform
 
-# 🚀 FIX: GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows
+# 🚀 GTK3 Runtime + Strikte Warnungs-Unterdrückung für Windows (GUI-Spezifisch)
 if platform.system().lower() == "windows":
     BASE_PATH = getattr(sys, "_MEIPASS", os.path.abspath("."))
     gtk3_bin = os.path.join(BASE_PATH, "gtk3", "bin")
 
     if os.path.exists(gtk3_bin):
         os.environ["PATH"] = gtk3_bin + os.pathsep + os.environ.get("PATH", "")
-
-        # BLOCKIERT DIE NERVIGEN UWP GLIB-WARNUNGEN KOMPLETT
         os.environ["GIO_USE_VFS"] = "local"
         os.environ["GIO_MODULE_DIR"] = " "
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
-        # 🚀 BULLETPROOF FONTCONFIG FIX
         fc_path = os.path.join(BASE_PATH, "gtk3", "etc", "fonts")
         if os.path.exists(fc_path):
             fc_path_unix = fc_path.replace("\\", "/")
             os.environ["FONTCONFIG_PATH"] = fc_path_unix
-            
+
             fonts_conf = os.path.join(fc_path, "fonts.conf")
             if not os.path.exists(fonts_conf):
                 try:
                     with open(fonts_conf, "w", encoding="utf-8") as f:
                         f.write(
                             '<?xml version="1.0"?><fontconfig>'
-                            '<dir>C:/Windows/Fonts</dir></fontconfig>'
+                            "<dir>C:/Windows/Fonts</dir></fontconfig>"
                         )
                 except Exception:
                     pass
-                    
+
             os.environ["FONTCONFIG_FILE"] = fc_path_unix + "/fonts.conf"
 
         if hasattr(os, "add_dll_directory"):
@@ -55,9 +53,8 @@ if platform.system().lower() == "windows":
 import logging
 import multiprocessing
 import subprocess
-import threading
-import warnings
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any, Optional
@@ -66,28 +63,27 @@ import customtkinter as ctk
 from PIL import Image
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-from src.engine import extract_to_spatial
-from src.generator import generate_pdf_from_spatial
-from src.validation import check_verapdf, get_verapdf_version
+# 🚀 FIX: Korrekter Import-Pfad (Application Layer) & Multi-Line (PEP 8 / E501)
+from src.application.converter_service import ConverterService, ConversionResult
 from src.config import get_worker_python
 from src.vsr_generator import generate_physical_vsr
 
-
-warnings.filterwarnings("ignore", category=UserWarning, module="requests")
-warnings.filterwarnings("ignore", message=".*urllib3.*")
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
 
 def get_resource_path(relative_path: str) -> str:
-    """Ermittelt den absoluten Pfad zur Ressource."""
+    """Ermittelt den absoluten Pfad zur Ressource (auch im PyInstaller Bundle)."""
     app_base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(app_base_path, relative_path)
 
 
 class TextboxHandler(logging.Handler):
-    """Leitet Logging-Nachrichten in das GUI-Textfeld weiter."""
+    """
+    Leitet Logging-Nachrichten thread-sicher in das GUI-Textfeld weiter.
+    Ersetzt das fehleranfällige und blockierende sys.stdout Hijacking.
+    """
 
     def __init__(self, textbox: ctk.CTkTextbox, master_app: ctk.CTk) -> None:
         super().__init__()
@@ -96,6 +92,7 @@ class TextboxHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = self.format(record)
+        # after(0, ...) ist die einzig thread-sichere Methode für Tkinter-Updates
         self.app.after(0, self._append_text, msg)
 
     def _append_text(self, msg: str) -> None:
@@ -108,35 +105,6 @@ class TextboxHandler(logging.Handler):
         self.app.update_idletasks()
 
 
-class StreamRedirector:
-    """Fängt stdout/stderr ab und sendet sie an die GUI."""
-
-    def __init__(self, textbox: ctk.CTkTextbox, master_app: ctk.CTk) -> None:
-        self.textbox = textbox
-        self.app = master_app
-
-    def write(self, text: str) -> None:
-        if text:
-            self.app.after(0, self._gui_write, text)
-
-    def _gui_write(self, text: str) -> None:
-        self.textbox.configure(state="normal")
-        if "\r" in text:
-            valid_text = text.split("\r")[-1].strip()
-            if valid_text:
-                self.textbox.delete("end-1c linestart", "end-1c")
-                self.textbox.insert("end-1c", valid_text)
-        else:
-            self.textbox.insert("end-1c", text)
-
-        self.textbox.see("end")
-        self.textbox.configure(state="disabled")
-        self.app.update_idletasks()
-
-    def flush(self) -> None:
-        pass
-
-
 class CustomTkDnD(ctk.CTk, TkinterDnD.DnDWrapper):
     """Fassade für Drag & Drop Funktionalität in CustomTkinter."""
 
@@ -145,9 +113,9 @@ class CustomTkDnD(ctk.CTk, TkinterDnD.DnDWrapper):
         self.tkdnd_version = TkinterDnD._require(self)
 
 
-# pylint: disable=too-many-ancestors
+# pylint: disable=too-many-ancestors, too-many-instance-attributes
 class App(CustomTkDnD):
-    """Haupt-GUI-Klasse des PDF A11y Converters."""
+    """Haupt-GUI-Klasse. Agiert als reiner View & Controller."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -155,27 +123,33 @@ class App(CustomTkDnD):
         self.geometry("800x800")
         self.minsize(650, 700)
 
-        self.selected_file: Optional[str] = None
+        self.selected_file: Optional[Path] = None
+        self.converted_output_path: Optional[Path] = None
         self.is_processing: bool = False
-        self._verapdf_version_logged: bool = False
-        self.converted_output_path: Optional[str] = None
+
+        # Sicherer Thread-Pool für Hintergrundaufgaben
+        self.executor = ThreadPoolExecutor(max_workers=2)
 
         self._build_ui()
         self._setup_logging()
         self.info_button.focus_set()
 
     def _setup_logging(self) -> None:
+        """Initialisiert das lokale Logging ins UI-Textfeld."""
         logger = logging.getLogger("pdf-converter")
         logger.setLevel(logging.INFO)
+
+        # Vorherige Handler entfernen (verhindert doppelte Logs)
+        for h in logger.handlers[:]:
+            logger.removeHandler(h)
+
         handler = TextboxHandler(self.log_textbox, self)
         fmt = logging.Formatter("[%(asctime)s] %(message)s", "%H:%M:%S")
         handler.setFormatter(fmt)
         logger.addHandler(handler)
 
-        sys.stdout = StreamRedirector(self.log_textbox, self)  # type: ignore
-        sys.stderr = StreamRedirector(self.log_textbox, self)  # type: ignore
-
     def _build_ui(self) -> None:
+        """Erzeugt alle UI-Elemente."""
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", padx=20, pady=(10, 0))
 
@@ -280,7 +254,7 @@ class App(CustomTkDnD):
         textbox.configure(state="disabled")
 
     def _get_hardware_info(self) -> str:
-        """Ermittelt die Hardware-Daten synchron (wird von Thread aufgerufen)."""
+        """Ermittelt Hardware-Daten isoliert (via Worker)."""
         cpu_name = platform.processor() or "Unbekannte CPU"
         cores = multiprocessing.cpu_count()
         has_gpu, gpu_name = False, ""
@@ -292,10 +266,8 @@ class App(CustomTkDnD):
                 "print(torch.cuda.get_device_name(0) "
                 "if torch.cuda.is_available() else '')"
             )
-            res = subprocess.run([str(py_exe), "-c", script],
-                capture_output=True,
-                text=True,
-                timeout=10,
+            res = subprocess.run(
+                [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
             )
             output = res.stdout.strip().split("\n")
 
@@ -316,17 +288,17 @@ class App(CustomTkDnD):
         textbox.insert("1.0", "Ermittle Hardware-Infos...\nBitte warten.")
         textbox.configure(state="disabled")
 
-        def _apply_text(tb: ctk.CTkTextbox, text: str) -> None:
-            tb.configure(state="normal")
-            tb.delete("1.0", "end")
-            tb.insert("1.0", text)
-            tb.configure(state="disabled")
+        def _apply_text(text: str) -> None:
+            textbox.configure(state="normal")
+            textbox.delete("1.0", "end")
+            textbox.insert("1.0", text)
+            textbox.configure(state="disabled")
 
         def _update_info() -> None:
             info = self._get_hardware_info()
-            self.after(0, _apply_text, textbox, info)
+            self.after(0, _apply_text, info)
 
-        threading.Thread(target=_update_info, daemon=True).start()
+        self.executor.submit(_update_info)
 
     def open_about_window(self) -> None:
         about_win = ctk.CTkToplevel(self)
@@ -363,10 +335,11 @@ class App(CustomTkDnD):
         if not path.lower().endswith(".pdf"):
             messagebox.showerror("Fehler", "Bitte eine PDF-Datei wählen.")
             return
-        self.selected_file = path
+
+        self.selected_file = Path(path)
         self.start_button.configure(state="normal")
         self.status_label.configure(
-            text=f"Ausgewählt: {os.path.basename(path)}", text_color="green"
+            text=f"Ausgewählt: {self.selected_file.name}", text_color="green"
         )
         self.converted_output_path = None
 
@@ -383,68 +356,45 @@ class App(CustomTkDnD):
         self.progressbar.pack(before=self.start_button)
         self.progressbar.start()
 
-        threading.Thread(target=self._run_phase_1, args=(self.selected_file,)).start()
+        out_path = self.selected_file.with_name(f"{self.selected_file.stem}_pdfua.pdf")
 
-    def _run_phase_1(self, input_path: str) -> None:
-        logger = logging.getLogger("pdf-converter")
-        if not self._verapdf_version_logged:
-            logger.info("🛠️ Validierungs-Software: %s", get_verapdf_version())
-            self._verapdf_version_logged = True
+        # Sichere Entkopplung an ThreadPoolExecutor (Vermeidet GIL/GUI Blockierung)
+        future = self.executor.submit(
+            self._run_conversion_task, self.selected_file, out_path
+        )
+        future.add_done_callback(self._on_conversion_done)
 
-        logger.info("🔍 Prüfe Original-PDF (%s)...", os.path.basename(input_path))
+    def _run_conversion_task(self, in_path: Path, out_path: Path) -> ConversionResult:
+        """Hintergrund-Task: Ruft den Application Service auf."""
+        service = ConverterService()
+        return service.convert(in_path, out_path)
 
-        initial_check = check_verapdf(input_path, is_final=False)
-        if initial_check.get("passed", False):
-            logger.info("🟢 Original-PDF ist bereits konform.")
-        else:
-            logger.info("🔴 Original-PDF ist NICHT barrierefrei.")
-
+    def _on_conversion_done(self, future: Future) -> None:
+        """Wird aufgerufen, wenn der Konvertierungsprozess endet."""
         try:
-            spatial_dom, images, doc_lang, docinfo = extract_to_spatial(input_path)
-            self._run_phase_3(spatial_dom, images, doc_lang, docinfo)
+            result: ConversionResult = future.result()
+            self.after(0, self._finish_ui_update, result)
         except Exception as e:
-            logger.error("Fehler in Phase 1: %s", e)
-            self.after(0, self._cancel_process, "Fehler bei der Extraktion.")
+            err_result = ConversionResult(success=False, error_message=str(e))
+            self.after(0, self._finish_ui_update, err_result)
 
-    def _run_phase_3(
-        self, spatial_dom: dict, images: dict, doc_lang: str, docinfo: dict
-    ) -> None:
-        if not self.selected_file:
-            return
-
-        base, ext = os.path.splitext(self.selected_file)
-        output_path = f"{base}_pdfua{ext}"
-        try:
-            success = generate_pdf_from_spatial(
-                spatial_dom, self.selected_file, images, output_path, docinfo, doc_lang
-            )
-            if success:
-                self.converted_output_path = output_path
-            self.after(0, self._finish, success, output_path)
-        except Exception as e:
-            logging.getLogger("pdf-converter").error("Fehler Phase 3: %s", e)
-            self.after(0, self._finish, False, str(e))
-
-    def _cancel_process(self, msg: str) -> None:
+    def _finish_ui_update(self, result: ConversionResult) -> None:
+        """Aktualisiert die UI sicher im Haupt-Thread."""
         self.is_processing = False
         self.progressbar.stop()
         self.progressbar.pack_forget()
         self.start_button.configure(state="normal")
         self.vsr_button.configure(state="normal")
-        self.status_label.configure(text=msg, text_color="orange")
 
-    def _finish(self, success: bool, output_path: str) -> None:
-        self.is_processing = False
-        self.progressbar.stop()
-        self.progressbar.pack_forget()
-        self.start_button.configure(state="normal")
-        self.vsr_button.configure(state="normal")
-        if success:
+        if result.success and result.output_path:
+            self.converted_output_path = result.output_path
             self.status_label.configure(
-                text=f"Erfolgreich: {os.path.basename(output_path)}", text_color="green"
+                text=f"Erfolgreich: {result.output_path.name}", text_color="green"
             )
         else:
-            self.status_label.configure(text="Fehler", text_color="red")
+            self.status_label.configure(
+                text=f"Fehler: {result.error_message}", text_color="red"
+            )
 
     def show_visual_screenreader(self) -> None:
         if self.is_processing:
@@ -452,26 +402,25 @@ class App(CustomTkDnD):
             return
 
         target_pdf = None
-        if self.converted_output_path and os.path.exists(self.converted_output_path):
+        if self.converted_output_path and self.converted_output_path.exists():
             target_pdf = self.converted_output_path
-        elif self.selected_file and os.path.exists(self.selected_file):
+        elif self.selected_file and self.selected_file.exists():
             target_pdf = self.selected_file
         else:
             messagebox.showwarning("Fehlt", "Bitte zuerst ein PDF auswählen.")
             return
 
-        threading.Thread(target=self._run_vsr_thread, args=(target_pdf,)).start()
+        self.executor.submit(self._run_vsr_task, target_pdf)
 
-    def _run_vsr_thread(self, pdf_path: str) -> None:
+    def _run_vsr_task(self, pdf_path: Path) -> None:
+        """Generiert den VSR im Hintergrund."""
         logger = logging.getLogger("pdf-converter")
         self.after(0, lambda: self.vsr_button.configure(state="disabled"))
 
         try:
-            p_path = Path(pdf_path)
-            logger.info("📄 Analysiere physischen Tag-Baum von %s...", p_path.name)
-
-            vsr_html = p_path.with_suffix(".visualscreenreader.html")
-            success = generate_physical_vsr(p_path, vsr_html)
+            logger.info("📄 Analysiere physischen Tag-Baum von %s...", pdf_path.name)
+            vsr_html = pdf_path.with_suffix(".visualscreenreader.html")
+            success = generate_physical_vsr(pdf_path, vsr_html)
 
             if success:
                 self.after(0, lambda: webbrowser.open(f"file://{vsr_html.absolute()}"))

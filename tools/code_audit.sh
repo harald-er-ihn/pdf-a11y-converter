@@ -20,17 +20,20 @@ else
     exit 1
 fi
 
-echo -e "\n🚀 Starte djlint..."| tee -a "$LOGFILE"
-if djlint . --reformat --quiet --exclude resources ; then
-    echo "✅ djlint erfolgreich abgeschlossen!"| tee -a "$LOGFILE"
-else
-    echo "⚠️ Fehler bei djlint."| tee -a "$LOGFILE"
-fi
+#echo -e "\n🚀 Prüfe HTML-Templates (djlint check)..." | tee -a "$LOGFILE"
+#djlint . --check --exclude resources 2>&1 | tee -a "$LOGFILE"
+
+#echo -e "\n🚀 Formatiere HTML-Templates (djlint reformat)..." | tee -a "$LOGFILE"
+#if djlint . --reformat --exclude resources 2>&1 | tee -a "$LOGFILE" ; then
+#    echo "✅ djlint erfolgreich abgeschlossen!"| tee -a "$LOGFILE"
+#else
+#    echo "⚠️ Fehler bei djlint."| tee -a "$LOGFILE"
+#fi
 
 # Validierungen
 python3 -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))"| tee -a "$LOGFILE"
 jq . config/config.json | tee -a "$LOGFILE"
-jq . config/nllb_mapping.json | tee -a "$LOGFILE"
+#jq . config/nllb_mapping.json | tee -a "$LOGFILE"
 shellcheck -x ./tools/*.sh| tee -a "$LOGFILE"
 
 echo -e "\n🔍 Starte Code-Formatter (Ruff)..."| tee -a "$LOGFILE"

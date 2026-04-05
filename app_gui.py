@@ -446,5 +446,11 @@ class App(CustomTkDnD):
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+
+    # 🚀 NEU: Enterprise Bootstrap Loader triggern
+    from src.runtime_bootstrap import ensure_runtime
+
+    ensure_runtime()
+
     master_app = App()
     master_app.mainloop()

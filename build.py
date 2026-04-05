@@ -5,6 +5,7 @@
 Build-Orchestrator für den PDF A11y Converter (Strategy Pattern).
 Kompiliert die Hauptanwendungen (GUI & CLI) plattformspezifisch.
 Das Setup der Worker-Umgebungen wurde in build_workers.py ausgelagert.
+Ruft am Ende das mitgelieferte, portable Inno Setup auf (.exe Generierung).
 """
 
 import os
@@ -76,7 +77,6 @@ class PyInstallerDirector:
             f"--add-data=README.md{SEP}.",
             f"--add-data=ARCHITECTURE.md{SEP}.",
             "--hidden-import=PIL._tkinter_finder",
-            "--hidden-import=frontend",
             "--hidden-import=pymupdf",
             "--hidden-import=fitz",
             "--exclude-module=tensorboard",
@@ -96,16 +96,36 @@ class PyInstallerDirector:
         PyInstaller.__main__.run(args)
 
 
+def build_installer() -> None:
+    """Builds the Inno Setup installer using the bundled portable compiler."""
+    iscc = Path("resources") / "windows" / "Inno Setup 6" / "ISCC.exe"
+    script = Path("installer") / "pdf-a11y.iss"
+
+    if not iscc.exists():
+        iscc = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
+        if not iscc.exists():
+            print("⚠️ Inno Setup Compiler nicht gefunden.")
+            print("Installer wird übersprungen.")
+            return
+
+    if not script.exists():
+        print(f"⚠️ Installer Script fehlt unter: {script}")
+        return
+
+    print("\n📦 Baue Installer mit Inno Setup...")
+    subprocess.run([str(iscc), str(script)], check=True)
+    print("✅ Installer erfolgreich erstellt (Siehe dist/installer/)!")
+
+
 def main() -> None:
     """Haupteinstiegspunkt des Orchestrators."""
     print("🚀 Starte PyInstaller Build-Prozess (Strategy Pattern)...")
 
-    # Auswahl der passenden Strategie zur Laufzeit
     strategy = WindowsBuilder() if sys.platform == "win32" else UnixBuilder()
     director = PyInstallerDirector(strategy)
 
     targets = [
-        BuildTarget("app_gui.py", "PDF-A11y-GUI", console=True),
+        BuildTarget("app_gui.py", "PDF-A11y-GUI", console=False),
         BuildTarget("cli.py", "PDF-A11y-CLI", console=True),
     ]
 
@@ -114,7 +134,6 @@ def main() -> None:
 
     print("\n📦 Kompilierung beendet. Starte Worker-Packaging...")
 
-    # Delegation an das dedizierte Packaging-Modul im Root-Verzeichnis!
     packaging_script = Path("build_workers.py")
     if packaging_script.exists():
         subprocess.run([sys.executable, str(packaging_script)], check=True)
@@ -122,6 +141,10 @@ def main() -> None:
         print(
             f"⚠️ Packaging-Skript fehlt ({packaging_script}). Worker wurden nicht gepackt!"
         )
+
+    if sys.platform == "win32":
+        print("\n🚀 Erstelle Split Distribution Installer...")
+        build_installer()
 
 
 if __name__ == "__main__":

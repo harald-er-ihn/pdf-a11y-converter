@@ -4,11 +4,13 @@
 """
 Isolierter Worker für KI-Übersetzungen (NLLB-200).
 Liest Sprach-Mappings dynamisch aus der config/nllb_mapping.json.
+Konsumiert die injizierten Hardware-Optimierungen der Engine.
 """
 
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +26,16 @@ logging.basicConfig(
     level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S"
 )
 logger = logging.getLogger("translation-worker")
+
+
+def get_optimized_dtype() -> torch.dtype:
+    """Liest die von der Engine injizierte Precision aus."""
+    mode = os.getenv("PDF_A11Y_PRECISION", "fp32")
+    if mode == "bf16":
+        return torch.bfloat16
+    elif mode == "fp16":
+        return torch.float16
+    return torch.float32
 
 
 def _load_lang_map() -> dict:
@@ -60,7 +72,7 @@ def main() -> None:
     target_iso = args.lang.split("-")[0].lower()
     lang_map = _load_lang_map()
 
-    # 🚀 Dynamischer Lookup in der von dir erstellten JSON!
+    # Dynamischer Lookup in der JSON
     target_nllb = lang_map.get(target_iso, "eng_Latn")
 
     if target_nllb == "eng_Latn":
@@ -72,10 +84,26 @@ def main() -> None:
     logger.info("🤖 Lade NLLB-200 Translation-Experten (%s)...", target_nllb)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_id = "facebook/nllb-200-distilled-600M"
+    dtype = get_optimized_dtype()
+
+    logger.info("Verwende Hardware: %s (Precision: %s)", device.upper(), dtype)
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_id, src_lang="eng_Latn")
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(device)
+
+        # Modell laden und Precision (torch_dtype) anwenden
+        model = (
+            AutoModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=dtype)
+            .to(device)
+            .eval()
+        )
+
+        # Modell kompilieren für massiven Speed-Boost (Torch 2.x)
+        try:
+            model = torch.compile(model, mode="max-autotune")
+            logger.info("🚀 Modell erfolgreich kompiliert (Speed-Boost aktiv).")
+        except Exception as e:
+            logger.debug("Modell-Kompilierung übersprungen: %s", e)
 
         results = {}
         for key, text in texts_to_translate.items():
@@ -84,7 +112,6 @@ def main() -> None:
                 continue
 
             inputs = tokenizer(text, return_tensors="pt").to(device)
-            # 🚀 FIX: Kompatibilität für moderne FastTokenizer
             target_id = tokenizer.convert_tokens_to_ids(target_nllb)
 
             with torch.no_grad():

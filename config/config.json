@@ -1,7 +1,7 @@
 {
   "paths": {
     "model_cache_dir": {
-      "windows": "~\\.pdf-a11y-models",
+      "windows": "C:\\ProgramData\\PDF-A11y\\models",
       "linux": "~/.pdf-a11y-models",
       "darwin": "~/.pdf-a11y-models",
       "default": "~/.pdf-a11y-models"

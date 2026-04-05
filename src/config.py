@@ -33,18 +33,24 @@ def get_worker_python(worker_name: str) -> Path:
     """Sucht den Python-Interpreter des isolierten Workers."""
     base_dir = _get_app_base_dir()
 
-    if sys.platform == "win32":
-        py_exe = base_dir / "workers" / worker_name / "python_env" / "python.exe"
-        if not py_exe.exists():
+    # 1. Produktionspfad (Kompiliert via PyInstaller)
+    if getattr(sys, "frozen", False):
+        if sys.platform == "win32":
+            py_exe = base_dir / "workers" / worker_name / "python_env" / "python.exe"
+        else:
+            py_exe = base_dir / "workers" / worker_name / "venv" / "bin" / "python"
+
+    # 2. Entwicklerpfad (Lokaler Quellcode)
+    else:
+        if sys.platform == "win32":
             py_exe = (
                 base_dir / "workers" / worker_name / "venv" / "Scripts" / "python.exe"
             )
-    else:
-        py_exe = base_dir / "workers" / worker_name / "venv" / "bin" / "python"
+        else:
+            py_exe = base_dir / "workers" / worker_name / "venv" / "bin" / "python"
 
     if not py_exe.exists():
         if getattr(sys, "frozen", False):
-            # 🚀 FIX: Nie die .exe als Fallback nutzen!
             raise FileNotFoundError(
                 f"Portable Python fehlt für {worker_name}! Gesucht unter: {py_exe}"
             )

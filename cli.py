@@ -84,6 +84,12 @@ def _setup_logger(verbose: bool) -> logging.Logger:
 
 def main() -> None:
     """Haupteinstiegspunkt für die Kommandozeile."""
+
+    # 🚀 NEU: Enterprise Bootstrap Loader triggern
+    from src.runtime_bootstrap import ensure_runtime
+
+    ensure_runtime()
+
     args = _parse_args()
     logger = _setup_logger(args.verbose)
 

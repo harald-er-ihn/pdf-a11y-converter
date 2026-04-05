@@ -5,14 +5,17 @@
 Der Semantic Orchestrator (Enterprise Edition).
 Nutzt ein DAG-Framework und dynamische Plugins zur parallelen Ausführung
 der isolierten Worker-Prozesse. Führt die Sensor-Fusion (Merge-Phase) durch.
+Integriert die 'Shared AI Runtime' via dynamischer PYTHONPATH Injection.
 """
 
 import json
 import logging
 import os
+import sys
 import re
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from functools import partial
@@ -115,8 +118,99 @@ class SemanticOrchestrator:
     def __init__(self) -> None:
         self.base_dir = _get_app_base_dir()
         self.workers_dir = self.base_dir / "workers"
-        self.temp_dir = self.base_dir / "temp" / "jobs"
+
+        # Enterprise-sicheres Temp-Verzeichnis (verhindert PermissionErrors)
+        sys_temp = Path(tempfile.gettempdir())
+        self.temp_dir = sys_temp / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def _inject_runtime_pythonpath(self, env: Dict[str, str]) -> None:
+        """Injiziert den Pfad zur Shared AI Runtime in die Umgebungsvariablen."""
+        from src.runtime_bootstrap import get_global_runtime_dir
+
+        is_frozen = getattr(sys, "frozen", False)
+
+        if not is_frozen and (self.base_dir / "runtime" / "ai_env").exists():
+            # Dev-Modus (Source Code)
+            runtime_dir = self.base_dir / "runtime" / "ai_env"
+            logger.debug("Nutze lokale Entwickler-Runtime: %s", runtime_dir)
+        else:
+            # Produktions-Modus (ProgramData)
+            runtime_dir = get_global_runtime_dir() / "ai_env"
+
+        if sys.platform == "win32":
+            runtime_site = runtime_dir / "Lib" / "site-packages"
+        else:
+            site_pkgs = list(runtime_dir.glob("lib/python*/site-packages"))
+            runtime_site = site_pkgs[0] if site_pkgs else runtime_dir / "lib"
+
+        if runtime_site.exists():
+            env["PYTHONPATH"] = (
+                str(runtime_site) + os.pathsep + env.get("PYTHONPATH", "")
+            )
+        else:
+            logger.warning(
+                "⚠️ Globale AI Runtime nicht gefunden unter: %s", runtime_site
+            )
+
+    def _get_optimized_environment(self) -> Dict[str, str]:
+        """
+        Baut ein hochoptimiertes Environment-Dict für die KI-Worker.
+        Nutzt das externe Skript runtime_optimizer.py, um Hardware-Features
+        (bfloat16, CUDA) zu erkennen, ohne Torch in den Main-Prozess zu laden.
+        """
+        env = os.environ.copy()
+
+        # 1. PYTHONPATH für die Shared AI Runtime injizieren
+        self._inject_runtime_pythonpath(env)
+
+        # 2. Hardware-Erkennung via Subprocess
+        hw_info = {"cuda": False, "bf16": False, "cpu_count": 4}
+        try:
+            # Wir nutzen den Python-Interpreter der Runtime, der Torch kennt
+            py_exe = get_worker_python("vision_worker")
+            opt_script = self.base_dir / "src" / "runtime_optimizer.py"
+
+            res = subprocess.run(
+                [str(py_exe), str(opt_script)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=True,
+            )
+            # Das Skript gibt uns ein sauberes JSON zurück
+            hw_info = json.loads(res.stdout.strip())
+            logger.debug("🧠 Hardware-Profil geladen: %s", hw_info)
+        except Exception as e:
+            logger.warning(
+                "⚠️ Hardware-Erkennung fehlgeschlagen. Nutze CPU-Fallback. (%s)", e
+            )
+
+        # 3. Precision Switching (Entscheidet über float32, float16 oder bfloat16)
+        precision = "fp32"
+        if hw_info.get("cuda"):
+            precision = "bf16" if hw_info.get("bf16") else "fp16"
+            env["CUDA_VISIBLE_DEVICES"] = (
+                "0"  # Verhindert, dass Worker auf falschen GPUs landen
+            )
+            logger.debug("⚡ Aktiviere GPU-Beschleunigung mit %s Precision", precision)
+
+        # Wir übergeben die Precision an die Worker via Environment-Variable
+        env["PDF_A11Y_PRECISION"] = precision
+
+        # 4. Torch Runtime Tuning (Aggressive CPU/Memory Optimierungen)
+        env["PYTORCH_CUDA_ALLOC_CONF"] = (
+            "max_split_size_mb:128"  # Verhindert Memory-Fragmentation
+        )
+        env["TOKENIZERS_PARALLELISM"] = "false"  # Verhindert Deadlocks in Transformers
+
+        # CPU Threads limitieren, damit sich parallele Worker im DAG nicht gegenseitig blockieren!
+        # (Nimmt maximal die halbe CPU-Kern-Zahl, aber höchstens 8)
+        optimal_threads = str(min(8, max(1, hw_info.get("cpu_count", 4) // 2)))
+        env["OMP_NUM_THREADS"] = optimal_threads
+        env["MKL_NUM_THREADS"] = optimal_threads
+
+        return env
 
     def _run_plugin_task(
         self,
@@ -127,7 +221,6 @@ class SemanticOrchestrator:
     ) -> Optional[Dict[str, Any]]:
         """
         Führt ein Worker-Plugin isoliert aus (Graceful Degradation).
-        Kehrt bei Fehler mit None zurück, um den DAG nicht zu crashen.
         """
         try:
             py_exe = get_worker_python(plugin.name)
@@ -135,19 +228,20 @@ class SemanticOrchestrator:
             logger.error(str(e))
             return None
 
-        # NEU: Das Skript und die Argumente sind nun sauber getrennt!
         cmd_args = plugin.get_arguments(input_pdf, job_dir, context)
         script_path = self.workers_dir / plugin.name / plugin.script_name
         cmd = [str(py_exe), str(script_path)] + cmd_args
 
         try:
-            env = os.environ.copy()
+            # 🚀 HIER: Wir holen uns das hochoptimierte Environment!
+            opt_env = self._get_optimized_environment()
+
             subprocess.run(
                 cmd,
                 check=True,
                 capture_output=True,
                 text=True,
-                env=env,
+                env=opt_env,  # 🚀 HIER: Wir übergeben es an den Worker-Prozess!
                 cwd=str(self.base_dir),
             )
 
@@ -168,28 +262,10 @@ class SemanticOrchestrator:
                 "--- WORKER ERROR LOG ---\n%s\n------------------------", err_msg
             )
             return None
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             logger.error("❌ Systemfehler beim Ausführen von %s: %s", plugin.name, e)
             return None
 
-    def _assign_alt_texts_to_dom(
-        self,
-        spatial_dom: Dict[str, Any],
-        images_dict: Dict[str, Tuple[Image.Image, str]],
-    ) -> None:
-        """Weist die Alt-Texte den leeren Layout-Figures zu."""
-        vision_alts = [alt for _, alt in images_dict.values()]
-        v_idx = 0
-        for page in spatial_dom.get("pages", []):
-            for el in page.get("elements", []):
-                if el.get("type") == "figure" and "alt_text" not in el:
-                    if v_idx < len(vision_alts):
-                        el["alt_text"] = vision_alts[v_idx]
-                        v_idx += 1
-                    else:
-                        el["alt_text"] = "Abbildung"
-
-    # pylint: disable=too-many-locals
     def _translate_content(
         self,
         spatial_dom: Dict[str, Any],
@@ -228,9 +304,17 @@ class SemanticOrchestrator:
             script_path = self.workers_dir / "translation_worker" / "run_translation.py"
             cmd = [str(py_exe), str(script_path)] + args
 
-            logger.info("▶ Starte Translation-Chain: 'translation_worker'...")
-            subprocess.run(cmd, check=True, capture_output=True, cwd=str(self.base_dir))
+            # 🚀 HIER: Auch die Translation-Chain bekommt das optimierte Environment!
+            opt_env = self._get_optimized_environment()
 
+            logger.info("▶ Starte Translation-Chain: 'translation_worker'...")
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                env=opt_env,
+                cwd=str(self.base_dir),
+            )
             if out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
                     trans_results = json.load(f)
@@ -249,6 +333,23 @@ class SemanticOrchestrator:
             logger.error("Übersetzung übersprungen: %s", e)
 
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
+
+    def _assign_alt_texts_to_dom(
+        self,
+        spatial_dom: Dict[str, Any],
+        images_dict: Dict[str, Tuple[Image.Image, str]],
+    ) -> None:
+        """Weist die Alt-Texte den leeren Layout-Figures zu."""
+        vision_alts = [alt for _, alt in images_dict.values()]
+        v_idx = 0
+        for page in spatial_dom.get("pages", []):
+            for el in page.get("elements", []):
+                if el.get("type") == "figure" and "alt_text" not in el:
+                    if v_idx < len(vision_alts):
+                        el["alt_text"] = vision_alts[v_idx]
+                        v_idx += 1
+                    else:
+                        el["alt_text"] = "Abbildung"
 
     def _merge_signatures(
         self, spatial_dom: Dict[str, Any], signatures: List[Dict[str, Any]]
@@ -417,7 +518,7 @@ class SemanticOrchestrator:
         context = {"lang": doc_lang, "force_ocr": diagnostics.force_ocr_extraction}
         orig_meta = _extract_original_metadata(input_path)
 
-        # 1. MAP PHASE (Dynamische Plugin-Ermittlung - STRING GEGEN CRASH)
+        # 1. MAP PHASE (Dynamische Plugin-Ermittlung)
         plugins = PluginLoader.load_all(str(self.workers_dir))
         dag_tasks = []
 
@@ -484,6 +585,57 @@ class SemanticOrchestrator:
             doc_lang=doc_lang,
             original_meta=orig_meta,
         )
+
+
+def _get_optimized_environment(self) -> Dict[str, str]:
+    """
+    Baut ein hochoptimiertes Environment-Dict für die KI-Worker.
+    Nutzt den runtime_optimizer, um Hardware-Features (bfloat16, CUDA) zu erkennen.
+    """
+    env = os.environ.copy()
+
+    # 1. PYTHONPATH für die Shared AI Runtime injizieren
+    self._inject_runtime_pythonpath(env)
+
+    # 2. Hardware-Erkennung via Subprocess (isoliert den Main-Prozess von Torch)
+    hw_info = {"cuda": False, "bf16": False, "cpu_count": 4}
+    try:
+        py_exe = get_worker_python("vision_worker")  # Nutzt die AI-Runtime
+        opt_script = self.base_dir / "src" / "runtime_optimizer.py"
+
+        res = subprocess.run(
+            [str(py_exe), str(opt_script)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        hw_info = json.loads(res.stdout.strip())
+        logger.info("🧠 Hardware-Profil geladen: %s", hw_info)
+    except Exception as e:
+        logger.warning(
+            "⚠️ Hardware-Erkennung fehlgeschlagen. Nutze CPU-Fallback. (%s)", e
+        )
+
+    # 3. Precision Switching
+    precision = "fp32"
+    if hw_info.get("cuda"):
+        precision = "bf16" if hw_info.get("bf16") else "fp16"
+        env["CUDA_VISIBLE_DEVICES"] = "0"
+        logger.info("⚡ Aktiviere GPU-Beschleunigung mit %s Precision", precision)
+
+    env["PDF_A11Y_PRECISION"] = precision
+
+    # 4. Torch Runtime Tuning (Aggressive Optimierungen)
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+
+    # CPU Threads limitieren, damit sich parallele Worker nicht gegenseitig blockieren
+    optimal_threads = str(min(8, max(1, hw_info.get("cpu_count", 4) // 2)))
+    env["OMP_NUM_THREADS"] = optimal_threads
+    env["MKL_NUM_THREADS"] = optimal_threads
+
+    return env
 
 
 def extract_to_spatial(input_path: str) -> ExtractionResult:

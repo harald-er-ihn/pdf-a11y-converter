@@ -38,8 +38,8 @@ shellcheck -x ./tools/*.sh| tee -a "$LOGFILE"
 
 echo -e "\n🔍 Starte Code-Formatter (Ruff)..."| tee -a "$LOGFILE"
 
-ruff check . --fix --exclude "resources" | tee -a "$LOGFILE"
-ruff format . --exclude "resources" | tee -a "$LOGFILE"
+ruff check . --fix --exclude "resources,runtime" | tee -a "$LOGFILE"
+ruff format . --exclude "resources,runtime"| tee -a "$LOGFILE"
 echo -e "\n🔍 Starte Qualitätsprüfung (Pylint)..."| tee -a "$LOGFILE"
 
 confirm="Y"
@@ -52,6 +52,7 @@ find . -type f -name "*.py" \
     -not -path "*/.venv/*" \
     -not -path "*/build/*" \
     -not -path "*/dist/*" \
+    -not -path "*/runtime/*" \
     -not -path "*/.ruff_cache/*" \
     -not -path "*/resources/*" -exec pylint {} + | tee -a "$LOGFILE"
 
@@ -62,5 +63,6 @@ find . -type f -name "*.py" \
     -not -path "*/.venv/*" \
     -not -path "*/build/*" \
     -not -path "*/dist/*" \
+    -not -path "*/runtime/*" \
     -not -path "*/.ruff_cache/*" \
     -not -path "*/resources/*" -exec radon cc -s {} + | tee -a "$LOGFILE"

@@ -5,11 +5,13 @@
 Isolierter Worker für Unterschriften-Erkennung (YOLOv8s).
 Nutzt ein lokales, GPL-kompatibles Modell (Tech4Humans).
 100% Offline-Betrieb. Keine Cloud-Abhängigkeit.
+Wendet die injizierte Precision via `half=True` Flag in Ultralytics an.
 """
 
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -27,20 +29,10 @@ logger = logging.getLogger("signature-worker")
 def get_signature_model() -> Path:
     """
     Ermittelt den Pfad zum lokalen YOLO-Modell.
-
-    Unterstützt sowohl den direkten Quellcode-Aufruf als auch die
-    kompilierte PyInstaller-Umgebung.
-
-    Returns:
-        Path: Absoluter Pfad zur .pt Modell-Datei.
-
-    Raises:
-        FileNotFoundError: Wenn das Modell nicht existiert.
     """
     if getattr(sys, "frozen", False):
         base_dir = Path(sys._MEIPASS)  # type: ignore # pylint: disable=protected-access
     else:
-        # 3 Ebenen hoch: workers/signature_worker/run_signatures.py -> root
         base_dir = Path(__file__).resolve().parent.parent.parent
 
     model_path = base_dir / "resources" / "models" / "yolov8s_signature.pt"
@@ -54,18 +46,15 @@ def get_signature_model() -> Path:
 def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
     """
     Rendert PDF-Seiten und nutzt lokales YOLOv8s für Signaturen.
-
-    Args:
-        pdf_path: Pfad zum Eingabe-PDF.
-
-    Returns:
-        Dict: Spatial DOM Struktur mit den gefundenen Signaturen.
     """
     spatial_data: Dict[str, Any] = {"pages": []}
 
+    # Precision Flag auslesen (YOLO braucht einen Boolean für Half-Precision)
+    mode = os.getenv("PDF_A11Y_PRECISION", "fp32")
+    use_half = mode in ["fp16", "bf16"]
+
     try:
         model_path = get_signature_model()
-        # Laden des Modells strikt von der lokalen Festplatte
         model = YOLO(str(model_path))
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.warning(
@@ -81,8 +70,8 @@ def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
                 pix = page.get_pixmap(matrix=mat, alpha=False)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-                # Modell Inference (ohne Konsolen-Spam)
-                results = model(img, verbose=False)
+                # Modell Inference (mit Half-Precision falls von Engine injiziert)
+                results = model(img, verbose=False, half=use_half)
                 elements = []
 
                 for result in results:

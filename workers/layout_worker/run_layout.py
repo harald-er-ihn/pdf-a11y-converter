@@ -5,6 +5,7 @@
 Isolierter Worker für die Layout-Erkennung.
 Nutzt Docling, um Text, Typen (H1, P, etc.) und exakte Bounding Boxes
 zu extrahieren. Konvertiert die PDF-Koordinaten in Web-Koordinaten.
+Profitiert passiv von den injizierten OMP/MKL-Thread-Limits der Engine.
 """
 
 import argparse

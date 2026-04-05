@@ -1,6 +1,8 @@
 # Python / Virtual Environment
 venv/
 .venv/
+runtime/ai_env/
+runtime/ai_env.zip
 __pycache__/
 *.pyc
 *.pyo

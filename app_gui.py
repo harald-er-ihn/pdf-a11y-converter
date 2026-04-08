@@ -170,16 +170,9 @@ class App(CustomTkDnD):
             width=160,
             command=self.show_visual_screenreader,
         )
-        self.hw_button = ctk.CTkButton(
-            btn_frame,
-            text="⚙️ Hardware-Check",
-            width=140,
-            command=self.open_hardware_check,
-        )
 
         self.info_button.pack(side="right", padx=(10, 0))
         self.vsr_button.pack(side="right", padx=(10, 0))
-        self.hw_button.pack(side="right", padx=(10, 0))
 
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -254,6 +247,62 @@ class App(CustomTkDnD):
         textbox.insert("1.0", content)
         textbox.configure(state="disabled")
 
+    def _populate_hardware_tab(self, tab: ctk.CTkFrame) -> None:
+        """Startet den Hardware-Check im Hintergrund und aktualisiert das Tab."""
+        textbox = ctk.CTkTextbox(tab, font=ctk.CTkFont(family="Consolas", size=12))
+        textbox.pack(fill="both", expand=True, padx=5, pady=5)
+        textbox.insert("1.0", "Prüfe Hardware-Komponenten...\nBitte warten.")
+        textbox.configure(state="disabled")
+
+        threading.Thread(
+            target=self._run_hw_check_thread, args=(textbox,), daemon=True
+        ).start()
+
+    def _run_hw_check_thread(self, textbox: ctk.CTkTextbox) -> None:
+        """Führt den eigentlichen Hardware-Check über das Worker-Venv aus."""
+        cpu_name = platform.processor() or "Unbekannte CPU"
+        cores = multiprocessing.cpu_count()
+        has_gpu, gpu_name = False, ""
+
+        try:
+            py_exe = get_worker_python("vision_worker")
+            script = (
+                "import torch; "
+                "print(torch.cuda.is_available()); "
+                "print(torch.cuda.get_device_name(0) "
+                "if torch.cuda.is_available() else '')"
+            )
+            res = subprocess.run(
+                [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
+            )
+            output = res.stdout.strip().split("\n")
+
+            if output and output[0] == "True":
+                has_gpu = True
+                gpu_name = output[1] if len(output) > 1 else "Unbekannte GPU"
+        except Exception:
+            pass
+
+        if has_gpu:
+            msg = (
+                f"✅ Grafikkarte (GPU) aktiv: {gpu_name}\n"
+                f"🖥️ CPU: {cpu_name} ({cores} Kerne)"
+            )
+        else:
+            msg = (
+                f"❌ Keine GPU (CPU-Modus).\n"
+                f"🖥️ CPU: {cpu_name} ({cores} Kerne)"
+            )
+
+        self.after(0, lambda: self._update_hw_textbox(textbox, msg))
+
+    def _update_hw_textbox(self, textbox: ctk.CTkTextbox, msg: str) -> None:
+        """Aktualisiert die Textbox im GUI-Thread."""
+        textbox.configure(state="normal")
+        textbox.delete("1.0", "end")
+        textbox.insert("1.0", msg)
+        textbox.configure(state="disabled")
+
     def open_about_window(self) -> None:
         """Zeigt die Dokumentationen im Tabview-Pattern an."""
         about_win = ctk.CTkToplevel(self)
@@ -267,40 +316,16 @@ class App(CustomTkDnD):
         self._populate_tab(
             tabview.add("Über"), "static/docs/about.txt", "PDF A11y Converter"
         )
-        self._populate_tab(tabview.add("README"), "README.md", "README nicht gefunden.")
+        self._populate_hardware_tab(tabview.add("Hardware"))
+        self._populate_tab(
+            tabview.add("README"), "README.md", "README nicht gefunden."
+        )
         self._populate_tab(
             tabview.add("Architektur"), "ARCHITECTURE.md", "Architektur fehlt."
         )
         self._populate_tab(
             tabview.add("Lizenzen"), "static/docs/licenses.txt", "Lizenzen fehlen."
         )
-
-    def open_hardware_check(self) -> None:
-        """Prüft die Hardware über das isolierte Worker-Venv."""
-        cpu_name = platform.processor() or "Unbekannte CPU"
-        cores = multiprocessing.cpu_count()
-        has_gpu, gpu_name = False, ""
-
-        try:
-            py_exe = get_worker_python("vision_worker")
-            script = "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
-            res = subprocess.run(
-                [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
-            )
-            output = res.stdout.strip().split("\n")
-
-            if output and output[0] == "True":
-                has_gpu = True
-                gpu_name = output[1] if len(output) > 1 else "Unbekannte GPU"
-        except Exception:
-            pass
-
-        if has_gpu:
-            msg = f"✅ Grafikkarte (GPU) aktiv: {gpu_name}\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
-        else:
-            msg = f"❌ Keine GPU (CPU-Modus).\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
-
-        messagebox.showinfo("Hardware-Check", msg)
 
     def browse_file(self, _event: Any = None) -> None:
         """Öffnet den File-Picker Dialog."""

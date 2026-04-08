@@ -52,10 +52,13 @@ Der **PDF A11y Converter** löst dieses Problem radikal durch das **Semantic Ove
 
 *Das Resultat:* Das Ausgangsprodukt sieht exakt so aus wie das Eingangsprodukt, ist aber maschinenlesbar, semantisch fehlerfrei und PDF/UA-1 konform.
 
-## 🧠 Architektur: Multi-Agenten-System
 
-Dieses Projekt ist als **Multi-Agenten-System** konzipiert. Um die gefürchtete *Dependency Hell* moderner KI-Bibliotheken zu vermeiden, läuft jeder Spezialist (Worker) in seiner eigenen, isolierten virtuellen Umgebung (Venv). Die Kommunikation erfolgt asynchron über ein Blackboard (Spatial DOM).
-
+## 🧠 Architektur: : Die 4-Stufen Enterprise Pipeline
+Um die gefürchtete Dependency Hell moderner KI-Bibliotheken zu vermeiden, läuft jeder Spezialist (Worker) in seiner eigenen, isolierten virtuellen Umgebung. Die Build-Architektur folgt strikt dem Single Responsibility Principle (SRP):
+1. **Build (build.py via PyInstaller):** Kompiliert schlanke Core-Binaries für GUI und CLI.
+2. **Assembly (assemble.py):** Baut isolierte Python-Venvs für die Worker und integriert das offizielle veraPDF Validierungs-Tool.
+3. **Packaging (package.py):** Inno Setup komprimiert die gigantischen KI-Modelle via LZMA2-Ultra in ausführbare Offline-Installer.
+4. **Distribution:** Autarkes Rollout via Matrix42 / SCCM.
 ![Architektur des PDF A11y Converters](static/img/architecture_graph.svg)
 
 ## ✨ Kern-Features

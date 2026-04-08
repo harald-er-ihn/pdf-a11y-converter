@@ -26,6 +26,7 @@ IGNORE_DIRS: Set[str] = {
     "TU_Dortmund_Corporate_Design",
     "models_local",
     ".vscode",
+    "build_temp",
     "veraPDF-validation-profiles-rel-1.28",  # 🚀 FIX: Toter Code mit zu tiefen Pfaden ausschließen!
 }
 

@@ -54,3 +54,5 @@ htmlcov/
 # Caches
 .cache/
 tools/bin/
+build_temp/
+installer/Output/

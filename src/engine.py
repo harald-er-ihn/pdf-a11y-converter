@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Dict, Tuple, List, Any
@@ -108,7 +109,10 @@ class SemanticOrchestrator:
     def __init__(self) -> None:
         self.base_dir = _get_app_base_dir()
         self.workers_dir = self.base_dir / "workers"
-        self.temp_dir = self.base_dir / "temp" / "jobs"
+        
+        # 🚀 FIX: OS-Temp-Verzeichnis nutzen, um WinError 5 (Zugriff verweigert)
+        # im Program Files Verzeichnis bei Enterprise-Deployments zu verhindern!
+        self.temp_dir = Path(tempfile.gettempdir()) / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_python_executable(self, worker_name: str) -> Path:
@@ -148,8 +152,8 @@ class SemanticOrchestrator:
         """Weist die Alt-Texte den leeren Layout-Figures zu."""
         vision_alts = [alt for _, alt in images_dict.values()]
         v_idx = 0
-        for page in spatial_dom.get("pages", []):
-            for el in page.get("elements", []):
+        for page in spatial_dom.get("pages",[]):
+            for el in page.get("elements",[]):
                 if el.get("type") == "figure" and "alt_text" not in el:
                     if v_idx < len(vision_alts):
                         el["alt_text"] = vision_alts[v_idx]
@@ -175,9 +179,9 @@ class SemanticOrchestrator:
             texts_to_translate[img_name] = alt_text
 
         # 2. Sammle vorgegebene Alt-Texte aus dem DOM (z.B. "Signature")
-        dom_alt_refs = []
-        for p_idx, page in enumerate(spatial_dom.get("pages", [])):
-            for e_idx, el in enumerate(page.get("elements", [])):
+        dom_alt_refs =[]
+        for p_idx, page in enumerate(spatial_dom.get("pages",[])):
+            for e_idx, el in enumerate(page.get("elements",[])):
                 if el.get("type") == "figure" and "alt_text" in el:
                     ref_key = f"dom_{p_idx}_{e_idx}"
                     texts_to_translate[ref_key] = el["alt_text"]
@@ -193,7 +197,7 @@ class SemanticOrchestrator:
         with open(in_json, "w", encoding="utf-8") as f:
             json.dump(texts_to_translate, f, ensure_ascii=False, indent=2)
 
-        args = ["--input", str(in_json), "--output", str(out_json), "--lang", doc_lang]
+        args =["--input", str(in_json), "--output", str(out_json), "--lang", doc_lang]
 
         logger.info("▶ Starte Spezialist: 'translation_worker'...")
         if self._run_worker("translation_worker", "run_translation.py", args):
@@ -227,7 +231,7 @@ class SemanticOrchestrator:
         for s_page in signatures:
             p_num = s_page.get("page_num")
             s_elements = s_page.get("elements", [])
-            for dom_page in spatial_dom.get("pages", []):
+            for dom_page in spatial_dom.get("pages",[]):
                 if dom_page.get("page_num") == p_num:
                     dom_page["elements"].extend(s_elements)
                     total_sigs += len(s_elements)
@@ -243,14 +247,14 @@ class SemanticOrchestrator:
         total_tables = 0
         for t_page in table_pages:
             p_num = t_page.get("page_num")
-            t_elements = t_page.get("elements", [])
-            for dom_page in spatial_dom.get("pages", []):
+            t_elements = t_page.get("elements",[])
+            for dom_page in spatial_dom.get("pages",[]):
                 if dom_page.get("page_num") != p_num:
                     continue
 
-                filtered_elements = []
+                filtered_elements =[]
                 for base_el in dom_page.get("elements", []):
-                    b_box = base_el.get("bbox", [0, 0, 0, 0])
+                    b_box = base_el.get("bbox",[0, 0, 0, 0])
                     cx = (b_box[0] + b_box[2]) / 2.0
                     cy = (b_box[1] + b_box[3]) / 2.0
 
@@ -281,7 +285,7 @@ class SemanticOrchestrator:
                     {
                         "type": "p",
                         "text": f"Feld: {field['name']} ({field['alt_text']})",
-                        "bbox": [0, 0, 10, 10],
+                        "bbox":[0, 0, 10, 10],
                     }
                 )
 
@@ -292,14 +296,14 @@ class SemanticOrchestrator:
         total_notes = 0
         for f_page in footnote_pages:
             p_num = f_page.get("page_num")
-            f_elements = f_page.get("elements", [])
+            f_elements = f_page.get("elements",[])
 
-            for dom_page in spatial_dom.get("pages", []):
+            for dom_page in spatial_dom.get("pages",[]):
                 if dom_page.get("page_num") != p_num:
                     continue
 
                 for base_el in dom_page.get("elements", []):
-                    b_box = base_el.get("bbox", [0, 0, 0, 0])
+                    b_box = base_el.get("bbox",[0, 0, 0, 0])
                     cx = (b_box[0] + b_box[2]) / 2.0
                     cy = (b_box[1] + b_box[3]) / 2.0
 
@@ -320,7 +324,7 @@ class SemanticOrchestrator:
         if not formula_md:
             return
 
-        latex_formulas = []
+        latex_formulas =[]
         matches = re.finditer(
             r"(\$\$|\\\[|\\\()(.*?)(\$\$|\\\]|\\\))", formula_md, flags=re.DOTALL
         )
@@ -334,7 +338,7 @@ class SemanticOrchestrator:
         replaced_count = 0
 
         for page in spatial_dom.get("pages", []):
-            for el in page.get("elements", []):
+            for el in page.get("elements",[]):
                 text = el.get("text", "")
                 is_garbage = len(text) < 25 and (
                     "̂" in text or "ݏ" in text or "\\" in text
@@ -390,7 +394,7 @@ class SemanticOrchestrator:
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
-        experts = [
+        experts =[
             ("layout_worker", "run_layout.py"),
             ("table_worker", "run_tables.py"),
             ("form_worker", "run_forms.py"),
@@ -402,7 +406,7 @@ class SemanticOrchestrator:
         # 1. MAP PHASE (Experten-Analyse)
         for worker_name, script_name in experts:
             target_json = job_dir / f"{worker_name}_result.json"
-            worker_args = ["--input", str(input_path), "--output", str(target_json)]
+            worker_args =["--input", str(input_path), "--output", str(target_json)]
 
             if diagnostics.force_ocr_extraction and worker_name == "layout_worker":
                 worker_args.append("--force-ocr")
@@ -434,22 +438,22 @@ class SemanticOrchestrator:
         )
 
         if "signature_worker" in blackboard_results:
-            sig_pages = blackboard_results["signature_worker"].get("pages", [])
+            sig_pages = blackboard_results["signature_worker"].get("pages",[])
             self._merge_signatures(spatial_dom, sig_pages)
 
         if "table_worker" in blackboard_results:
-            tbl_pages = blackboard_results["table_worker"].get("pages", [])
+            tbl_pages = blackboard_results["table_worker"].get("pages",[])
             self._merge_tables(spatial_dom, tbl_pages)
 
         if "formula_worker" in blackboard_results:
             self._merge_formulas(spatial_dom, blackboard_results["formula_worker"])
 
         if "footnote_worker" in blackboard_results:
-            fn_pages = blackboard_results["footnote_worker"].get("pages", [])
+            fn_pages = blackboard_results["footnote_worker"].get("pages",[])
             self._merge_footnotes(spatial_dom, fn_pages)
 
         if "form_worker" in blackboard_results:
-            frm_fields = blackboard_results["form_worker"].get("fields", [])
+            frm_fields = blackboard_results["form_worker"].get("fields",[])
             self._merge_forms(spatial_dom, frm_fields)
 
         images_dict = self._process_images(spatial_dom, job_dir)

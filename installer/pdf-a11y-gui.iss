@@ -9,7 +9,7 @@ OutputBaseFilename=Install_PDF-A11y-GUI
 ; Höchste Kompressionsstufe für die riesigen KI-Modelle
 Compression=lzma2/ultra64
 SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 ; Matrix42 Opt-Ins (verhindert nervige Dialoge bei Silent Install)
 DisableWelcomePage=yes
 DisableDirPage=yes

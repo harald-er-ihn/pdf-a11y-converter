@@ -6,7 +6,7 @@ DefaultDirName={autopf}\PDF-A11y-Converter-CLI
 OutputBaseFilename=Install_PDF-A11y-CLI
 Compression=lzma2/ultra64
 SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 ; WICHTIG: Sagt Windows, dass sich Umgebungsvariablen ändern
 ChangesEnvironment=yes
 DisableWelcomePage=yes

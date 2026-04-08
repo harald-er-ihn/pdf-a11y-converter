@@ -2,14 +2,12 @@
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
-Build-Skript für den PDF A11y Converter.
-Kompiliert die Hauptanwendung (GUI & CLI) und richtet Worker ein.
+Phase 1 der Build-Pipeline: PyInstaller Core Build (SRP).
+Kompiliert die Hauptanwendung (GUI & CLI) in strikt getrennte Verzeichnisse.
 """
 
 import os
 import shutil
-import subprocess
-import sys
 import warnings
 from pathlib import Path
 
@@ -20,91 +18,83 @@ os.environ["LANG"] = "C"
 os.environ["LC_ALL"] = "C"
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyInstaller")
 
-CTK_PATH = os.path.dirname(customtkinter.__file__)
-SEP = os.pathsep
+# 🚀 FIX: Zeigt jetzt korrekt auf das Verzeichnis, in dem build.py liegt
+ROOT_DIR = Path(__file__).resolve().parent
+DIST_DIR = ROOT_DIR / "dist"
+BUILD_DIR = ROOT_DIR / "build_temp"
 
-config_path = os.path.abspath("config")
-static_path = os.path.abspath("static")
-resources_path = os.path.abspath("resources")
+CTK_PATH = Path(customtkinter.__file__).parent
 
-print("🚀 Starte PyInstaller Dual-Build-Prozess...")
 
-build_targets = [
-    {
-        "script": "app_gui.py",
-        "name": "PDF-A11y-GUI",
-        "console": True,
-    },
-    {"script": "cli.py", "name": "PDF-A11y-CLI", "console": True},
-]
+def clean_directories() -> None:
+    """Bereinigt alte Build-Artefakte."""
+    print("🧹 Bereinige alte Builds...")
+    for d in [DIST_DIR, BUILD_DIR]:
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
 
-for target in build_targets:
-    print(f"\n⚙️ Kompiliere {target['name']}...")
 
-    args = [
-        target["script"],
-        f"--name={target['name']}",
+def build_gui() -> None:
+    """Kompiliert die GUI-Version mit allen UI-Abhängigkeiten."""
+    print("\n⚙️ Kompiliere PDF-A11y-GUI...")
+    
+    args =[
+        str(ROOT_DIR / "app_gui.py"),
+        "--name=pdf-a11y-gui",
         "--onedir",
-        f"--add-data={CTK_PATH}{SEP}customtkinter/",
-        f"--add-data={config_path}{SEP}config/",
-        f"--add-data={static_path}{SEP}static/",
-        f"--add-data={resources_path}{SEP}resources/",
-        f"--add-data=README.md{SEP}.",  # 🚀 FIX: README hinzugefügt
-        f"--add-data=ARCHITECTURE.md{SEP}.",  # 🚀 FIX: ARCHITECTURE hinzugefügt
+        "--noconsole",
+        "--clean",
+        "--workpath", str(BUILD_DIR),
+        "--distpath", str(DIST_DIR),
+        f"--add-data={CTK_PATH}{os.pathsep}customtkinter/",
+        f"--add-data={ROOT_DIR / 'config' / 'config.json'}{os.pathsep}config/",
+        f"--add-data={ROOT_DIR / 'config' / 'nllb_mapping.json'}{os.pathsep}config/",
+        f"--add-data={ROOT_DIR / 'static'}{os.pathsep}static/",
+        f"--add-data={ROOT_DIR / 'README.md'}{os.pathsep}.",
+        f"--add-data={ROOT_DIR / 'ARCHITECTURE.md'}{os.pathsep}.",
         "--hidden-import=PIL._tkinter_finder",
-        "--hidden-import=frontend",
         "--hidden-import=pymupdf",
         "--hidden-import=fitz",
         "--exclude-module=tensorboard",
         "--noconfirm",
     ]
-
-    if not target["console"]:
-        args.append("--noconsole")
-
     PyInstaller.__main__.run(args)
 
-print("\n📂 Kopiere Worker-Skripte für beide Builds...")
-for target in build_targets:
-    dist_workers_dir = Path(f"dist/{target['name']}/workers")
-    src_workers_dir = Path("workers")
 
-    if src_workers_dir.exists():
-        shutil.copytree(
-            src_workers_dir,
-            dist_workers_dir,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("venv", ".venv", "__pycache__"),
-        )
+def build_cli() -> None:
+    """Kompiliert die headless CLI-Version (optimiert, ohne UI-Bloat)."""
+    print("\n⚙️ Kompiliere PDF-A11y-CLI (Headless)...")
+    
+    args =[
+        str(ROOT_DIR / "cli.py"),
+        "--name=pdf-a11y-cli",
+        "--onedir",
+        "--console",
+        "--clean",
+        "--workpath", str(BUILD_DIR),
+        "--distpath", str(DIST_DIR),
+        f"--add-data={ROOT_DIR / 'config' / 'config.json'}{os.pathsep}config/",
+        f"--add-data={ROOT_DIR / 'config' / 'nllb_mapping.json'}{os.pathsep}config/",
+        f"--add-data={ROOT_DIR / 'static'}{os.pathsep}static/",
+        f"--add-data={ROOT_DIR / 'README.md'}{os.pathsep}.",
+        f"--add-data={ROOT_DIR / 'ARCHITECTURE.md'}{os.pathsep}.",
+        "--hidden-import=pymupdf",
+        "--hidden-import=fitz",
+        "--exclude-module=customtkinter",  # CLI braucht keine GUI
+        "--exclude-module=tkinter",        # CLI braucht keine GUI
+        "--exclude-module=tensorboard",
+        "--noconfirm",
+    ]
+    PyInstaller.__main__.run(args)
 
-        print(f"\n⚙️ Richte Venvs in {target['name']} ein...")
-        for worker_dir in dist_workers_dir.iterdir():
-            req_file = worker_dir / "requirements.txt"
 
-            if worker_dir.is_dir() and req_file.exists():
-                print(f"  -> [{worker_dir.name}]")
-                venv_dir = worker_dir / "venv"
+def main() -> None:
+    print("🚀 Starte PyInstaller Phase 1 (Core Binaries)...")
+    clean_directories()
+    build_gui()
+    build_cli()
+    print("\n🎉 Phase 1 (Core Build) erfolgreich abgeschlossen!")
 
-                subprocess.run(
-                    [sys.executable, "-m", "venv", str(venv_dir)], check=True
-                )
 
-                if sys.platform == "win32":
-                    py_exe = venv_dir / "Scripts" / "python.exe"
-                    pip_exe = venv_dir / "Scripts" / "pip.exe"
-                else:
-                    py_exe = venv_dir / "bin" / "python"
-                    pip_exe = venv_dir / "bin" / "pip"
-
-                subprocess.run(
-                    [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
-                    check=False,
-                )
-
-                subprocess.run(
-                    [str(pip_exe), "install", "-r", str(req_file)],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                )
-
-print("\n🎉 Dual-Build erfolgreich abgeschlossen!")
+if __name__ == "__main__":
+    main()

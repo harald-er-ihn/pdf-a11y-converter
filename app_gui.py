@@ -289,10 +289,7 @@ class App(CustomTkDnD):
                 f"🖥️ CPU: {cpu_name} ({cores} Kerne)"
             )
         else:
-            msg = (
-                f"❌ Keine GPU (CPU-Modus).\n"
-                f"🖥️ CPU: {cpu_name} ({cores} Kerne)"
-            )
+            msg = f"❌ Keine GPU (CPU-Modus).\n🖥️ CPU: {cpu_name} ({cores} Kerne)"
 
         self.after(0, lambda: self._update_hw_textbox(textbox, msg))
 
@@ -317,9 +314,7 @@ class App(CustomTkDnD):
             tabview.add("Über"), "static/docs/about.txt", "PDF A11y Converter"
         )
         self._populate_hardware_tab(tabview.add("Hardware"))
-        self._populate_tab(
-            tabview.add("README"), "README.md", "README nicht gefunden."
-        )
+        self._populate_tab(tabview.add("README"), "README.md", "README nicht gefunden.")
         self._populate_tab(
             tabview.add("Architektur"), "ARCHITECTURE.md", "Architektur fehlt."
         )

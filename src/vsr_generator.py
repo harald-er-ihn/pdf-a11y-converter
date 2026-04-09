@@ -54,15 +54,15 @@ def _get_pdf_text_blocks(pdf_path: Path) -> List[str]:
     Dies stellt sicher, dass die extrahierte Reihenfolge 1:1 mit den MCIDs
     übereinstimmt und die FIFO-Starvation verhindert wird.
     """
-    span_texts =[]
+    span_texts = []
     try:
         with fitz.open(pdf_path) as doc:
             for page in doc:
                 # sort=False ist der Schlüssel: Exakte C-Stream Reihenfolge!
                 dict_data = page.get_text("dict", sort=False)
                 for block in dict_data.get("blocks", []):
-                    for line in block.get("lines",[]):
-                        for span in line.get("spans",[]):
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
                             text = span.get("text", "").strip()
                             if text:
                                 text = text.replace("\n", " ")
@@ -144,9 +144,19 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
             else:
                 alt_text = alt_obj
 
-        is_container = tag in[
-            "DOCUMENT", "DIV", "PART", "ART", "SECT",
-            "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "L", "LBODY"
+        is_container = tag in [
+            "DOCUMENT",
+            "DIV",
+            "PART",
+            "ART",
+            "SECT",
+            "TABLE",
+            "THEAD",
+            "TBODY",
+            "TFOOT",
+            "TR",
+            "L",
+            "LBODY",
         ]
 
         kids_html = ""
@@ -211,7 +221,7 @@ def generate_physical_vsr(pdf_path: Path, output_path: Path) -> bool:
 
             struct_tree = root.StructTreeRoot
 
-            html_head =[
+            html_head = [
                 "<!DOCTYPE html>",
                 "<html>",
                 "<head>",
@@ -234,9 +244,11 @@ def generate_physical_vsr(pdf_path: Path, output_path: Path) -> bool:
 
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(
-                    "\n".join(html_head) + "\n" +
-                    body_html + "\n" +
-                    "\n".join(html_tail)
+                    "\n".join(html_head)
+                    + "\n"
+                    + body_html
+                    + "\n"
+                    + "\n".join(html_tail)
                 )
 
             return True

@@ -37,15 +37,17 @@ def clean_directories() -> None:
 def build_gui() -> None:
     """Kompiliert die GUI-Version mit allen UI-Abhängigkeiten."""
     print("\n⚙️ Kompiliere PDF-A11y-GUI...")
-    
-    args =[
+
+    args = [
         str(ROOT_DIR / "app_gui.py"),
         "--name=pdf-a11y-gui",
         "--onedir",
         "--noconsole",
         "--clean",
-        "--workpath", str(BUILD_DIR),
-        "--distpath", str(DIST_DIR),
+        "--workpath",
+        str(BUILD_DIR),
+        "--distpath",
+        str(DIST_DIR),
         f"--add-data={CTK_PATH}{os.pathsep}customtkinter/",
         f"--add-data={ROOT_DIR / 'config' / 'config.json'}{os.pathsep}config/",
         f"--add-data={ROOT_DIR / 'config' / 'nllb_mapping.json'}{os.pathsep}config/",
@@ -64,15 +66,17 @@ def build_gui() -> None:
 def build_cli() -> None:
     """Kompiliert die headless CLI-Version (optimiert, ohne UI-Bloat)."""
     print("\n⚙️ Kompiliere PDF-A11y-CLI (Headless)...")
-    
-    args =[
+
+    args = [
         str(ROOT_DIR / "cli.py"),
         "--name=pdf-a11y-cli",
         "--onedir",
         "--console",
         "--clean",
-        "--workpath", str(BUILD_DIR),
-        "--distpath", str(DIST_DIR),
+        "--workpath",
+        str(BUILD_DIR),
+        "--distpath",
+        str(DIST_DIR),
         f"--add-data={ROOT_DIR / 'config' / 'config.json'}{os.pathsep}config/",
         f"--add-data={ROOT_DIR / 'config' / 'nllb_mapping.json'}{os.pathsep}config/",
         f"--add-data={ROOT_DIR / 'static'}{os.pathsep}static/",
@@ -81,7 +85,7 @@ def build_cli() -> None:
         "--hidden-import=pymupdf",
         "--hidden-import=fitz",
         "--exclude-module=customtkinter",  # CLI braucht keine GUI
-        "--exclude-module=tkinter",        # CLI braucht keine GUI
+        "--exclude-module=tkinter",  # CLI braucht keine GUI
         "--exclude-module=tensorboard",
         "--noconfirm",
     ]

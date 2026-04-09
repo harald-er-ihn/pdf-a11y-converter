@@ -15,7 +15,11 @@ ROOT_DIR = Path(__file__).resolve().parent
 INSTALLER_DIR = ROOT_DIR / "installer"
 
 # Standard-Pfad von Inno Setup Compiler
-ISCC_PATH = Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe"
+ISCC_PATH = (
+    Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
+    / "Inno Setup 6"
+    / "ISCC.exe"
+)
 
 
 def build_installer(iss_file: Path) -> None:
@@ -23,7 +27,7 @@ def build_installer(iss_file: Path) -> None:
     if not iss_file.exists():
         print(f"⚠️ Überspringe {iss_file.name} (Nicht gefunden).")
         return
-        
+
     print(f"\n📦 Kompiliere Installer: {iss_file.name} ...")
     # Durch die LZMA2-Kompression der KI-Modelle kann das ein paar Minuten dauern!
     try:
@@ -36,7 +40,7 @@ def build_installer(iss_file: Path) -> None:
 
 def main() -> None:
     print("🚀 Starte Phase 3: Installer Packaging (Inno Setup)...")
-    
+
     if not ISCC_PATH.exists():
         print(f"❌ Inno Setup Compiler nicht gefunden unter:\n{ISCC_PATH}")
         print("Bitte installiere Inno Setup 6: https://jrsoftware.org/isdl.php")

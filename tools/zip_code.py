@@ -41,6 +41,7 @@ INCLUDE_EXT: Set[str] = {
     ".sh",
     ".md",
     ".txt",
+    ".iss",
 }
 
 SPECIAL_FILES: Set[str] = {"Dockerfile", "requirements.txt", ".gitignore"}

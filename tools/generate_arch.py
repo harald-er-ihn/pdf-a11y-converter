@@ -74,7 +74,10 @@ def generate_architecture_graph() -> None:
         shape="hexagon",
     )
     dot.node(
-        "VSR_Out", "HTML-Vorschau\n(PAC26 Style)", fillcolor="#2b5e8f", fontcolor="white"
+        "VSR_Out",
+        "HTML-Vorschau\n(PAC26 Style)",
+        fillcolor="#2b5e8f",
+        fontcolor="white",
     )
 
     # Flow

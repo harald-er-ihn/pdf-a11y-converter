@@ -397,10 +397,12 @@ class SemanticOrchestrator:
         experts = [
             ("layout_worker", "run_layout.py"),
             ("table_worker", "run_tables.py"),
+            ("signature_worker", "run_signatures.py"),
             ("form_worker", "run_forms.py"),
+            ("vision_worker", "run_vision.py"),
+            ("translation_worker", "run_translation.py"),
             ("formula_worker", "run_formula.py"),
             ("footnote_worker", "run_footnote.py"),
-            ("signature_worker", "run_signatures.py"),
         ]
 
         # 1. MAP PHASE (Experten-Analyse)

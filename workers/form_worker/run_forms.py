@@ -3,31 +3,31 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für Formulare.
-Extrahiert interaktive Formularfelder (AcroForms) und deren Bounding Boxes,
-damit sie später vom Generator exakt an der richtigen Stelle als barrierefreie
-HTML-Inputs reproduziert werden können.
+Extrahiert interaktive Formularfelder (AcroForms) und deren Bounding Boxes.
 """
 
 import argparse
 import json
-import logging
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
-import pikepdf
+# 🚀 SYSTEM-PATH FIX für common import
+WORKER_ROOT = Path(__file__).resolve().parent.parent
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S"
-)
-logger = logging.getLogger("form-worker")
+from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+
+logger = setup_worker_logging("form-worker")
+configure_torch_runtime()
+
+import pikepdf  # pylint: disable=wrong-import-position
 
 
-def extract_forms(pdf_path: Path) -> dict[str, list]:
-    """
-    Sucht nach AcroForm-Feldern im PDF und extrahiert deren Eigenschaften.
-    Fail-Fast: Wenn keine Formulare da sind, wird direkt ein leeres Dict geliefert.
-    """
-    form_data: dict[str, list] = {"fields": []}
+def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
+    """Sucht nach AcroForm-Feldern im PDF und extrahiert deren Eigenschaften."""
+    form_data: Dict[str, List[Dict[str, Any]]] = {"fields":[]}
 
     try:
         with pikepdf.open(str(pdf_path)) as pdf:
@@ -40,14 +40,9 @@ def extract_forms(pdf_path: Path) -> dict[str, list]:
                 return form_data
 
             for field in acro_form.Fields:
-                # Feldtyp (z.B. /Tx für Text, /Btn für Button/Checkbox)
                 ftype = str(field.get("/FT", "Unknown"))
-                # Interner Name des Feldes
                 fname = str(field.get("/T", "Unnamed")).strip("()")
-                # Wert (falls vorausgefüllt)
                 fvalue = str(field.get("/V", "")).strip("()")
-
-                # Barrierefreier Alternativtext (Tooltip/TU)
                 alt_text = str(field.get("/TU", fname)).strip("()")
 
                 form_data["fields"].append(
@@ -59,13 +54,14 @@ def extract_forms(pdf_path: Path) -> dict[str, list]:
                     }
                 )
 
-    except Exception as e:
-        logger.error(f"Fehler bei der Formular-Extraktion: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Fehler bei der Formular-Extraktion: %s", e)
 
     return form_data
 
 
 def main() -> None:
+    """Haupteinstiegspunkt für den Form-Worker."""
     parser = argparse.ArgumentParser(description="Formular Experte (pikepdf)")
     parser.add_argument("--input", required=True, help="Pfad zum Eingabe-PDF")
     parser.add_argument("--output", required=True, help="Pfad zur Ausgabe-JSON")
@@ -75,18 +71,26 @@ def main() -> None:
     output_json = Path(args.output)
 
     if not input_pdf.exists():
-        logger.error(f"❌ Eingabedatei nicht gefunden: {input_pdf}")
+        logger.error("❌ Eingabedatei nicht gefunden: %s", input_pdf)
         sys.exit(1)
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"🤖 Formular-Worker analysiert {input_pdf.name}...")
+    logger.info("🤖 Formular-Worker analysiert %s...", input_pdf.name)
 
-    extracted_forms = extract_forms(input_pdf)
+    try:
+        extracted_forms = extract_forms(input_pdf)
+        with open(output_json, "w", encoding="utf-8") as f:
+            json.dump(extracted_forms, f, ensure_ascii=False, indent=2)
 
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(extracted_forms, f, ensure_ascii=False, indent=2)
-
-    logger.info("✅ Formular-Extraktion erfolgreich abgeschlossen.")
+        logger.info("✅ Formular-Extraktion erfolgreich abgeschlossen.")
+        
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("❌ Fataler Fehler im Form-Worker: %s", e)
+        sys.exit(1)
+        
+    finally:
+        # 🚀 ENTERPRISE MEMORY CLEANUP
+        cleanup_memory(aggressive=False)
 
 
 if __name__ == "__main__":

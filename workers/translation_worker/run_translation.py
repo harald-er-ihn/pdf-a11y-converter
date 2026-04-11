@@ -8,22 +8,25 @@ Liest Sprach-Mappings dynamisch aus der config/nllb_mapping.json.
 
 import argparse
 import json
-import logging
 import sys
 from pathlib import Path
+
+# 🚀 SYSTEM-PATH FIX für common import
+WORKER_ROOT = Path(__file__).resolve().parent.parent
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
+
+from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+
+logger = setup_worker_logging("translation-worker")
+configure_torch_runtime()
 
 try:
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 except ImportError:
-    print("❌ FEHLER: Module fehlen. Bitte Venv neu bauen:")
-    print("   ./tools/rebuild_worker_venvs.sh")
+    logger.error("❌ FEHLER: Module fehlen. Bitte Venv neu bauen.")
     sys.exit(1)
-
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S"
-)
-logger = logging.getLogger("translation-worker")
 
 
 def _load_lang_map() -> dict:
@@ -59,8 +62,6 @@ def main() -> None:
 
     target_iso = args.lang.split("-")[0].lower()
     lang_map = _load_lang_map()
-
-    # 🚀 Dynamischer Lookup in der von dir erstellten JSON!
     target_nllb = lang_map.get(target_iso, "eng_Latn")
 
     if target_nllb == "eng_Latn":
@@ -73,6 +74,9 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_id = "facebook/nllb-200-distilled-600M"
 
+    model = None
+    tokenizer = None
+
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_id, src_lang="eng_Latn")
         model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(device)
@@ -84,7 +88,6 @@ def main() -> None:
                 continue
 
             inputs = tokenizer(text, return_tensors="pt").to(device)
-            # 🚀 FIX: Kompatibilität für moderne FastTokenizer
             target_id = tokenizer.convert_tokens_to_ids(target_nllb)
 
             with torch.no_grad():
@@ -103,6 +106,14 @@ def main() -> None:
     except Exception as e:
         logger.error("❌ Fataler Fehler im Translation-Worker: %s", e)
         sys.exit(1)
+        
+    finally:
+        # 🚀 ENTERPRISE MEMORY CLEANUP
+        if model is not None:
+            del model
+        if tokenizer is not None:
+            del tokenizer
+        cleanup_memory(aggressive=True)
 
 
 if __name__ == "__main__":

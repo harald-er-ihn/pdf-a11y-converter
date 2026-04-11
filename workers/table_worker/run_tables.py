@@ -10,17 +10,21 @@ sprachabhängig (i18n) auf, um PAC26 Fehler restlos zu beheben.
 import argparse
 import html
 import json
-import logging
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-import pdfplumber
+# 🚀 SYSTEM-PATH FIX für common import
+WORKER_ROOT = Path(__file__).resolve().parent.parent
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S"
-)
-logger = logging.getLogger("table-worker")
+from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+
+logger = setup_worker_logging("table-worker")
+configure_torch_runtime()
+
+import pdfplumber  # pylint: disable=wrong-import-position
 
 
 def get_column_word(lang_code: str) -> str:
@@ -42,14 +46,14 @@ def get_column_word(lang_code: str) -> str:
 # pylint: disable=too-many-nested-blocks
 def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     """Extrahiert Tabellen streng nach PAC26 Table-Regularity Regeln."""
-    spatial_data: Dict[str, Any] = {"pages": []}
+    spatial_data: Dict[str, Any] = {"pages":[]}
     col_word = get_column_word(doc_lang)
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
                 tables = page.find_tables()
-                page_elements: List[Dict[str, Any]] = []
+                page_elements: List[Dict[str, Any]] =[]
 
                 for table in tables:
                     data = table.extract()
@@ -58,14 +62,11 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
 
                     # 1. PAC26 Fix: Maximale Spaltenzahl ermitteln
                     max_cols = max((len(r) for r in data), default=1)
-
                     bbox = [table.bbox[0], table.bbox[1], table.bbox[2], table.bbox[3]]
-
                     html_table = "<table style='width:100%; height:100%;'>\n"
 
                     for row_idx, row in enumerate(data):
                         html_table += "<tr>\n"
-
                         padded_row = list(row)
                         while len(padded_row) < max_cols:
                             padded_row.append("")
@@ -87,7 +88,6 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                         html_table += "</tr>\n"
 
                     html_table += "</table>"
-
                     page_elements.append(
                         {"type": "table", "html": html_table, "bbox": bbox}
                     )
@@ -126,14 +126,21 @@ def main() -> None:
     output_json.parent.mkdir(parents=True, exist_ok=True)
     logger.info("🤖 Table-Worker analysiert %s...", input_pdf.name)
 
-    # 🚀 FIX: args.lang wird jetzt sauber übergeben!
-    extracted = extract_spatial_tables(input_pdf, args.lang)
+    try:
+        extracted = extract_spatial_tables(input_pdf, args.lang)
+        with open(output_json, "w", encoding="utf-8") as f:
+            json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(extracted, f, ensure_ascii=False, indent=2)
-
-    table_count = sum(len(p.get("elements", [])) for p in extracted.get("pages", []))
-    logger.info("✅ %s Tabelle(n) erfolgreich extrahiert.", table_count)
+        table_count = sum(len(p.get("elements", [])) for p in extracted.get("pages",[]))
+        logger.info("✅ %s Tabelle(n) erfolgreich extrahiert.", table_count)
+        
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("❌ Fataler Fehler im Table-Worker: %s", e)
+        sys.exit(1)
+        
+    finally:
+        # 🚀 ENTERPRISE MEMORY CLEANUP
+        cleanup_memory(aggressive=False)
 
 
 if __name__ == "__main__":

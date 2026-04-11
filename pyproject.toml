@@ -69,3 +69,14 @@ disable =[
     "unused-argument",
     "subprocess-run-check"
 ]
+
+# ==========================================
+# Ruff Linter Konfiguration
+# ==========================================
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+# Worker MÜSSEN sys.path und os.environ manipulieren, BEVOR sie schwere KI-Module laden.
+# Daher ist E402 (Imports nicht ganz oben) hier architektonisch zwingend gewollt!
+"workers/**/*.py" = ["E402"]

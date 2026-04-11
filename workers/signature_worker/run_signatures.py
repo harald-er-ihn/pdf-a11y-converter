@@ -43,13 +43,13 @@ def get_signature_model() -> Path:
 
 def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
     """Rendert PDF-Seiten und nutzt lokales YOLOv8s für Signaturen."""
-    spatial_data: Dict[str, Any] = {"pages":[]}
+    spatial_data: Dict[str, Any] = {"pages": []}
     model = None
 
     try:
         model_path = get_signature_model()
         model = YOLO(str(model_path))
-        
+
         with fitz.open(pdf_path) as doc:
             for page_num, page in enumerate(doc, start=1):
                 mat = fitz.Matrix(2.0, 2.0)
@@ -57,7 +57,7 @@ def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
                 results = model(img, verbose=False)
-                elements =[]
+                elements = []
 
                 for result in results:
                     boxes = result.boxes
@@ -78,8 +78,10 @@ def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
                     )
 
     except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.warning("⚠️ Graceful Degradation: Signatur-Erkennung übersprungen (%s)", e)
-        
+        logger.warning(
+            "⚠️ Graceful Degradation: Signatur-Erkennung übersprungen (%s)", e
+        )
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         if model is not None:
@@ -111,7 +113,7 @@ def main() -> None:
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-    sig_count = sum(len(p.get("elements", [])) for p in extracted.get("pages",[]))
+    sig_count = sum(len(p.get("elements", [])) for p in extracted.get("pages", []))
     logger.info("✅ %s Unterschrift(en) erfolgreich extrahiert.", sig_count)
 
 

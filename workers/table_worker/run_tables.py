@@ -46,14 +46,14 @@ def get_column_word(lang_code: str) -> str:
 # pylint: disable=too-many-nested-blocks
 def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     """Extrahiert Tabellen streng nach PAC26 Table-Regularity Regeln."""
-    spatial_data: Dict[str, Any] = {"pages":[]}
+    spatial_data: Dict[str, Any] = {"pages": []}
     col_word = get_column_word(doc_lang)
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
                 tables = page.find_tables()
-                page_elements: List[Dict[str, Any]] =[]
+                page_elements: List[Dict[str, Any]] = []
 
                 for table in tables:
                     data = table.extract()
@@ -131,13 +131,15 @@ def main() -> None:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-        table_count = sum(len(p.get("elements", [])) for p in extracted.get("pages",[]))
+        table_count = sum(
+            len(p.get("elements", [])) for p in extracted.get("pages", [])
+        )
         logger.info("✅ %s Tabelle(n) erfolgreich extrahiert.", table_count)
-        
+
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("❌ Fataler Fehler im Table-Worker: %s", e)
         sys.exit(1)
-        
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=False)

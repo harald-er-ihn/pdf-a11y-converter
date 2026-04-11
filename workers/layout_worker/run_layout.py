@@ -108,7 +108,7 @@ def _extract_elements(
 
             p_num = prov.page_no
             p_h = page_heights.get(p_num, 842.0)
-            bbox =[prov.bbox.l, p_h - prov.bbox.t, prov.bbox.r, p_h - prov.bbox.b]
+            bbox = [prov.bbox.l, p_h - prov.bbox.t, prov.bbox.r, p_h - prov.bbox.b]
 
             text = getattr(item, "text", "")
             el_type = _map_docling_type(item.label.name, level)
@@ -137,7 +137,7 @@ def extract_spatial_data_docling(
     doc = result.document
 
     spatial_dom: Dict[str, Any] = {
-        "pages":[],
+        "pages": [],
         "images": _extract_images(doc, output_dir),
     }
     page_heights = {}
@@ -147,7 +147,7 @@ def extract_spatial_data_docling(
         h = page_info.size.height if hasattr(page_info, "size") else 842.0
         page_heights[page_no] = h
         spatial_dom["pages"].append(
-            {"page_num": page_no, "width": w, "height": h, "elements":[]}
+            {"page_num": page_no, "width": w, "height": h, "elements": []}
         )
 
     _extract_elements(doc, page_heights, spatial_dom)
@@ -167,7 +167,7 @@ def extract_with_marker_fallback(input_path: Path, output_dir: Path) -> Dict[str
 
     logger.info("Starte Marker-Fallback (Flat Spatial DOM)...")
     artifacts = {}
-    for name in["load_all_models", "load_models", "create_model_dict"]:
+    for name in ["load_all_models", "load_models", "create_model_dict"]:
         if hasattr(marker.models, name):
             artifacts = getattr(marker.models, name)()
             break
@@ -184,15 +184,15 @@ def extract_with_marker_fallback(input_path: Path, output_dir: Path) -> Dict[str
     # 🚀 ENTERPRISE MEMORY CLEANUP
     del artifacts
     del converter
-    
+
     return {
-        "pages":[
+        "pages": [
             {
                 "page_num": 1,
                 "width": 595.0,
                 "height": 842.0,
-                "elements":[
-                    {"type": "p", "text": rendered.markdown, "bbox":[0, 0, 595, 842]}
+                "elements": [
+                    {"type": "p", "text": rendered.markdown, "bbox": [0, 0, 595, 842]}
                 ],
             }
         ],
@@ -226,7 +226,7 @@ def main() -> None:
         except Exception as ex:  # pylint: disable=broad-exception-caught
             logger.error("❌ Layout-Extraktion fehlgeschlagen: %s", ex)
             sys.exit(1)
-            
+
     finally:
         cleanup_memory(aggressive=True)
 

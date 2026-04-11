@@ -31,7 +31,7 @@ GROBID_URL = "http://localhost:8070/api/processFulltextDocument"
 
 def _parse_grobid_coords(coords_str: str) -> list[dict[str, Any]]:
     """Hilfsfunktion zum Parsen der GROBID-Koordinaten-Strings."""
-    elements =[]
+    elements = []
     # GROBID-Koordinaten-Format: "page_num,x,y,width,height;page_num,x,y..."
     for coord in coords_str.split(";"):
         parts = coord.split(",")
@@ -84,7 +84,7 @@ def extract_footnotes_via_grobid(pdf_path: Path) -> Dict[str, Any]:
             for el in parsed_elements:
                 p_num = el.pop("page_num")
                 if p_num not in pages_dict:
-                    pages_dict[p_num] =[]
+                    pages_dict[p_num] = []
                 pages_dict[p_num].append(el)
 
         for p_num, elements in pages_dict.items():
@@ -127,13 +127,13 @@ def main() -> None:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-        note_count = sum(len(p.get("elements", [])) for p in extracted.get("pages",[]))
+        note_count = sum(len(p.get("elements", [])) for p in extracted.get("pages", []))
         logger.info("✅ %s Fußnote(n) erfolgreich extrahiert.", note_count)
-        
+
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("❌ Fataler Fehler im Footnote-Worker: %s", e)
         sys.exit(1)
-        
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=False)

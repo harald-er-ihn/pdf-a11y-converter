@@ -8,6 +8,8 @@ PROJECT_DIR="/media/harald/CloudSpace/pdf-a11y-converter"
 export PYTHONPATH=$PROJECT_DIR
 TMP_ROOT="/home/harald/Downloads"
 LOGFILE="/home/harald/Dokumente/PDF-A11y-Converter/code_audit.log.txt"
+rm "$LOGFILE"
+touch "$LOGFILE"
 
 cd "$PROJECT_DIR" || { echo "❌ Projektverzeichnis nicht gefunden."; exit 1; }
 mkdir -p "$TMP_ROOT"

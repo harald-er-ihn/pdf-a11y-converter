@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-# 🚀 SYSTEM-PATH FIX: Erlaubt den Import von 'common', ohne dass wir 
+# 🚀 SYSTEM-PATH FIX: Erlaubt den Import von 'common', ohne dass wir
 # src/ oder das Root-Verzeichnis injizieren müssen!
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
@@ -90,13 +90,13 @@ def main() -> None:
         sys.exit(1)
 
     finally:
-        # 🚀 ENTERPRISE MEMORY CLEANUP: 
+        # 🚀 ENTERPRISE MEMORY CLEANUP:
         # Zuerst lokale Referenzen zerstören, DANN aufräumen
         if model is not None:
             del model
         if processor is not None:
             del processor
-            
+
         cleanup_memory(aggressive=True)
 
 

@@ -4,7 +4,7 @@
 """
 Memory cleanup helpers for machine learning workers.
 
-This module provides a defensive cleanup function that triggers 
+This module provides a defensive cleanup function that triggers
 garbage collection and optionally clears GPU memory (PyTorch).
 """
 
@@ -17,8 +17,8 @@ logger = logging.getLogger("worker-cleanup")
 def cleanup_memory(aggressive: bool = False) -> None:
     """
     Erzwingt Garbage Collection und leert den PyTorch VRAM.
-    
-    WICHTIG: Der Aufrufer (Worker) muss die großen Objekte VOR Aufruf 
+
+    WICHTIG: Der Aufrufer (Worker) muss die großen Objekte VOR Aufruf
     dieser Funktion mit `del objekt` aus seinem lokalen Scope löschen!
 
     Args:
@@ -35,7 +35,7 @@ def cleanup_memory(aggressive: bool = False) -> None:
             if aggressive:
                 torch.cuda.synchronize()
             torch.cuda.empty_cache()
-            
+
     except ImportError:
         pass
     except Exception as e:  # pylint: disable=broad-exception-caught

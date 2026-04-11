@@ -106,7 +106,7 @@ def main() -> None:
     except Exception as e:
         logger.error("❌ Fataler Fehler im Translation-Worker: %s", e)
         sys.exit(1)
-        
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         if model is not None:

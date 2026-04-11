@@ -62,10 +62,12 @@ def _get_nougat_main() -> Optional[Callable]:
     """Löst den Einstiegspunkt für Nougat dynamisch auf (Fail-Fast)."""
     try:
         import predict  # type: ignore # pylint: disable=import-outside-toplevel
+
         return predict.main
     except ImportError:
         try:
             from nougat.cli import main as nougat_main  # type: ignore # pylint: disable=import-outside-toplevel
+
             return nougat_main
         except ImportError:
             return None
@@ -96,7 +98,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        sys.argv =["nougat", str(input_pdf), "--out", str(temp_out_dir), "--markdown"]
+        sys.argv = ["nougat", str(input_pdf), "--out", str(temp_out_dir), "--markdown"]
         nougat_main()
 
         mmd_file = temp_out_dir / f"{input_pdf.stem}.mmd"
@@ -116,7 +118,7 @@ def main() -> None:
     except Exception as e:
         logger.error("❌ Fataler Fehler im Formula-Worker: %s", e)
         sys.exit(1)
-        
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=True)

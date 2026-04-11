@@ -27,7 +27,7 @@ import pikepdf  # pylint: disable=wrong-import-position
 
 def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
     """Sucht nach AcroForm-Feldern im PDF und extrahiert deren Eigenschaften."""
-    form_data: Dict[str, List[Dict[str, Any]]] = {"fields":[]}
+    form_data: Dict[str, List[Dict[str, Any]]] = {"fields": []}
 
     try:
         with pikepdf.open(str(pdf_path)) as pdf:
@@ -83,11 +83,11 @@ def main() -> None:
             json.dump(extracted_forms, f, ensure_ascii=False, indent=2)
 
         logger.info("✅ Formular-Extraktion erfolgreich abgeschlossen.")
-        
+
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.error("❌ Fataler Fehler im Form-Worker: %s", e)
         sys.exit(1)
-        
+
     finally:
         # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=False)

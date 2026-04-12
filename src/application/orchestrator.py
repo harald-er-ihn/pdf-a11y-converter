@@ -103,7 +103,7 @@ class SemanticOrchestrator:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def _run_worker(self, manifest: WorkerManifest, args: List[str]) -> bool:
-        """Führt einen isolierten Worker mit striktem Timeout (Defensive) aus."""
+        """Führt einen isolierten Worker aus. Setzt Telemetrie-Blocker (Option A)."""
         script_path = manifest.worker_dir / manifest.script
         worker_venv = manifest.worker_dir / "venv"
 
@@ -112,7 +112,11 @@ class SemanticOrchestrator:
             if sys.platform == "win32"
             else worker_venv / "bin" / "python"
         )
+
         if not py_exe.exists():
+            if getattr(sys, "frozen", False):
+                logger.error("❌ FATAL: Worker Venv fehlt im kompilierten Build (%s)!", py_exe)
+                return False
             py_exe = Path(sys.executable)
 
         cmd = [str(py_exe), str(script_path)]
@@ -122,12 +126,22 @@ class SemanticOrchestrator:
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
 
+        # 🚀 OPTION A: Telemetrie-freie Runtime-Isolation
+        env["HF_HUB_OFFLINE"] = "1"
+        env["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        env["DISABLE_TELEMETRY"] = "1"
+        env["DO_NOT_TRACK"] = "1"
+        env["ANONYMIZED_TELEMETRY"] = "False"
+        env["HUGGINGFACE_CO_RESOLVE_ENDPOINT"] = "0"
+
         try:
+            # 🚀 FIX: encoding="utf-8" ist überlebenswichtig auf Windows wegen Emojis!
             subprocess.run(
                 cmd,
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 env=env,
                 timeout=manifest.timeout_sec,
             )
@@ -140,7 +154,13 @@ class SemanticOrchestrator:
             )
             return False
         except subprocess.CalledProcessError as e:
-            logger.debug("Subprozess Crash: %s", e.stderr)
+            # 🚀 FIX: Echten Crash-Log für den Admin sichtbar machen!
+            logger.error("❌ Subprozess Crash in '%s' (Code %s)", manifest.name, e.returncode)
+            if e.stderr:
+                logger.error("--- WORKER ERROR LOG ---\n%s", e.stderr.strip())
+            return False
+        except Exception as e:
+            logger.error("❌ Systemfehler beim Starten von '%s': %s", manifest.name, e)
             return False
 
     def _assign_alt_texts_to_dom(
@@ -148,7 +168,6 @@ class SemanticOrchestrator:
         spatial_dom: Dict[str, Any],
         images_dict: Dict[str, Tuple[Image.Image, str]],
     ) -> None:
-        """Weist die Alt-Texte den leeren Layout-Figures zu."""
         vision_alts = [alt for _, alt in images_dict.values()]
         v_idx = 0
         for page in spatial_dom.get("pages", []):
@@ -167,9 +186,7 @@ class SemanticOrchestrator:
         doc_lang: str,
         job_dir: Path,
     ) -> None:
-        """Übersetzt Alt-Texte und mappt sie präzise in den Spatial DOM."""
         texts_to_translate = {}
-
         for img_name, (_, alt_text) in images_dict.items():
             texts_to_translate[img_name] = alt_text
 
@@ -200,7 +217,6 @@ class SemanticOrchestrator:
 
             success = self._run_worker(manifest, args)
 
-            # 🚀 Error Contract Auswertung
             if out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)
@@ -365,7 +381,6 @@ class SemanticOrchestrator:
             args = ["--input", str(input_json), "--output", str(output_json)]
             success = self._run_worker(manifest, args)
 
-            # 🚀 Error Contract Auswertung
             if output_json.exists():
                 with open(output_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)
@@ -427,7 +442,6 @@ class SemanticOrchestrator:
             logger.info("▶ Starte Spezialist: '%s'...", worker.name)
             success = self._run_worker(worker, worker_args)
 
-            # 🚀 Error Contract Auswertung
             if target_json.exists():
                 with open(target_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)

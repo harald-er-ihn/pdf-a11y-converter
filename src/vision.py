@@ -8,6 +8,7 @@ Delegiert die Bildanalyse an einen isolierten Subprozess.
 
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Dict
@@ -55,10 +56,17 @@ def get_image_descriptions(
         str(output_json),
     ]
 
-    logger.info("▶ 4/6 Vision-Worker: Generiere Alt-Texte für Bilder...")
+    # 🚀 FIX FÜR CRASH CODE 103 (PyInstaller Venv Dependency Hell Prevention)
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+
+    logger.info("▶ Starte Spezialist: 'vision_worker'...")
 
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, check=True, capture_output=True, text=True, env=env
+        )
         logger.debug(f"[vision_worker STDOUT]\n{result.stdout}")
 
         if output_json.exists():
@@ -70,5 +78,4 @@ def get_image_descriptions(
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Vision-Worker ist abgestürzt (Code {e.returncode}).")
         logger.error(f"Error Log:\n{e.stderr}")
-        # Pylint Fix: Explicites 'from e' für saubere Tracebacks
         raise RuntimeError("Fehler bei der Bildanalyse. Prozess abgebrochen.") from e

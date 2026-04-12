@@ -35,6 +35,10 @@ from src.vsr_generator import generate_physical_vsr
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
 warnings.filterwarnings("ignore", message=".*urllib3.*")
 
+# 🚀 FIX: Unterdrückt lästige GTK/GLib C-Level Warnungen auf Windows
+os.environ["GIO_USE_VFS"] = "local"
+os.environ["GLIB_LOG_LEVEL"] = "4"
+
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -272,8 +276,19 @@ class App(CustomTkDnD):
                 "print(torch.cuda.get_device_name(0) "
                 "if torch.cuda.is_available() else '')"
             )
+
+            # 🚀 FIX: Isoliere die Umgebung, damit PyInstaller's PYTHONPATH
+            # den Subprozess (das Venv) nicht korrumpiert! (Behebt Code 103)
+            env = os.environ.copy()
+            env.pop("PYTHONHOME", None)
+            env.pop("PYTHONPATH", None)
+
             res = subprocess.run(
-                [str(py_exe), "-c", script], capture_output=True, text=True, timeout=10
+                [str(py_exe), "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
             )
             output = res.stdout.strip().split("\n")
 
@@ -306,6 +321,11 @@ class App(CustomTkDnD):
         about_win.title("Dokumentation & Hilfe")
         about_win.geometry("850x650")
         about_win.resizable(True, True)
+
+        # 🚀 FIX: Zwingt das Fenster garantiert vor das Hauptfenster!
+        about_win.attributes("-topmost", True)
+        about_win.after(150, lambda: about_win.attributes("-topmost", False))
+        about_win.focus_force()
 
         tabview = ctk.CTkTabview(about_win)
         tabview.pack(fill="both", expand=True, padx=10, pady=10)
@@ -455,7 +475,6 @@ class App(CustomTkDnD):
 
             vsr_html = p_path.with_suffix(".visualscreenreader.html")
 
-            # 🚀 DIREKTER AUFRUF der nackten, physischen PDF-Wahrheit!
             success = generate_physical_vsr(p_path, vsr_html)
 
             if success:

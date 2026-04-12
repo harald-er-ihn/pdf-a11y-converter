@@ -13,6 +13,10 @@ import sys
 import warnings
 from pathlib import Path
 
+# 🚀 FIX: Unterdrückt lästige GTK/GLib C-Level Warnungen auf Windows
+os.environ["GIO_USE_VFS"] = "local"
+os.environ["GLIB_LOG_LEVEL"] = "4"
+
 from src.engine import extract_to_spatial
 from src.generator import generate_pdf_from_spatial
 from src.validation import check_verapdf, get_verapdf_version
@@ -49,7 +53,6 @@ def main() -> None:
     group_debug.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose Mode."
     )
-    # 🚀 FIX: action="store_true" verhindert, dass argparse das PDF als Parameter frisst
     group_debug.add_argument(
         "--visualscreenreader",
         action="store_true",
@@ -100,14 +103,11 @@ def main() -> None:
 
     spatial_dom, images, doc_lang, docinfo = extract_to_spatial(args.input)
 
-    # Zuerst das PDF rekonstruieren...
     generate_pdf_from_spatial(
         spatial_dom, args.input, images, str(out_path), docinfo, doc_lang
     )
 
-    # ... dann den fertigen Output-Baum als HTML ausgeben
     if args.visualscreenreader:
-        # 🚀 FIX: Pfad wird nun automatisch abgeleitet
         vsr_path = out_path.with_suffix(".visualscreenreader.html")
 
         logger.info("👁️ Generiere Visual Screenreader aus dem fertigen PDF/UA...")

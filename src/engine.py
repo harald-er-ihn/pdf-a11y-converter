@@ -9,6 +9,7 @@ Implementiert das Blackboard-Pattern und die Sensor-Fusion (Merge-Phase).
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -126,10 +127,19 @@ class SemanticOrchestrator:
         script_path = self.workers_dir / worker_name / script_name
         if not script_path.exists():
             return False
+
         cmd = [str(self._get_python_executable(worker_name)), str(script_path)]
         cmd.extend(args)
+
+        # 🚀 FIX FÜR CRASH CODE 103 (PyInstaller Venv Dependency Hell Prevention)
+        # Löscht die von PyInstaller injizierten Pfade, damit die Worker
+        # ihre eigenen Standard-Bibliotheken (encodings, etc.) laden können!
+        env = os.environ.copy()
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
             return True
         except subprocess.CalledProcessError as e:
             logger.error(
@@ -370,7 +380,6 @@ class SemanticOrchestrator:
 
         return images_dict
 
-    # pylint: disable=too-many-locals
     def extract(
         self, input_path: Path, doc_lang: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -383,8 +392,6 @@ class SemanticOrchestrator:
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
-        # 🚀 FIX: Vision und Translation Worker dürfen NICHT in der Map-Phase (PDF-Input)
-        # aufgerufen werden. Sie werden in der Reduce-Phase mit JSON-Inputs orchestriert!
         experts = [
             ("layout_worker", "run_layout.py"),
             ("table_worker", "run_tables.py"),
@@ -447,7 +454,6 @@ class SemanticOrchestrator:
             frm_fields = blackboard_results["form_worker"].get("fields", [])
             self._merge_forms(spatial_dom, frm_fields)
 
-        # 🚀 Die Vision- und Translations-Pipeline wird HIER orchestriert!
         images_dict = self._process_images(spatial_dom, job_dir)
         self._translate_content(spatial_dom, images_dict, doc_lang, job_dir)
 

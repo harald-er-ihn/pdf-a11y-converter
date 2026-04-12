@@ -27,9 +27,6 @@ dependencies =[
 [project.scripts]
 pdf-a11y = "cli:main"
 
-# ==========================================
-# FIX: Struktur-Deklaration zur Verhinderung von Duplicate Metadata
-# ==========================================
 [tool.setuptools]
 packages = ["src"]
 py-modules = ["cli", "app_gui", "converter", "build", "gpu_test"]
@@ -41,7 +38,6 @@ filterwarnings =[
 ]
 
 [tool.pylint.master]
-# Erlaubt Pylint, das in C geschriebene PyMuPDF (fitz) Modul zu analysieren
 extension-pkg-allow-list = ["fitz"]
 
 [tool.pylint.messages_control]
@@ -67,16 +63,12 @@ disable =[
     "redefined-outer-name",
     "unnecessary-pass",
     "unused-argument",
-    "subprocess-run-check"
+    "subprocess-run-check",
+    "wrong-import-position"
 ]
 
-# ==========================================
-# Ruff Linter Konfiguration
-# ==========================================
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint.per-file-ignores]
-# Worker MÜSSEN sys.path und os.environ manipulieren, BEVOR sie schwere KI-Module laden.
-# Daher ist E402 (Imports nicht ganz oben) hier architektonisch zwingend gewollt!
 "workers/**/*.py" = ["E402"]

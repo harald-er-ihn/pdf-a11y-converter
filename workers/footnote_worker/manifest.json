@@ -1,0 +1,1 @@
+{"name": "footnote_worker", "script": "run_footnote.py", "timeout_sec": 300, "phase": "map"}

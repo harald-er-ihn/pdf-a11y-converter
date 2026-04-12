@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Union
 from pydantic import BaseModel, Field, ValidationError
 
 from src.config import get_resource_path
-from src.verapdf_manager import get_verapdf_path
+from src.infrastructure.validation.verapdf_manager import get_verapdf_path
 
 logger = logging.getLogger("pdf-converter")
 

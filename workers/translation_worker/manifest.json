@@ -1,0 +1,1 @@
+{"name": "translation_worker", "script": "run_translation.py", "timeout_sec": 300, "phase": "reduce", "requires_lang": true}

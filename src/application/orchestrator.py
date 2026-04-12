@@ -24,7 +24,7 @@ from PIL import Image
 
 from src.pdf_diagnostics import PDFPreflightScanner
 from src.repair import repair_spatial_dom
-from src.vision import get_image_descriptions
+from src.plugins.workers import PluginManager, WorkerManifest
 
 logger = logging.getLogger("pdf-converter")
 
@@ -90,61 +90,62 @@ def _extract_original_metadata(input_path: Path) -> dict[str, str]:
     return meta
 
 
-def _get_app_base_dir() -> Path:
-    """Ermittelt das Basisverzeichnis der Anwendung."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
 def _is_inside(center_x: float, center_y: float, box: List[float]) -> bool:
     """Prüft, ob ein Mittelpunkt (x,y) innerhalb einer Bounding Box liegt."""
     return box[0] <= center_x <= box[2] and box[1] <= center_y <= box[3]
 
 
-# pylint: disable=too-few-public-methods
 class SemanticOrchestrator:
     """Orchestriert die isolierten Experten-Worker."""
 
     def __init__(self) -> None:
-        self.base_dir = _get_app_base_dir()
-        self.workers_dir = self.base_dir / "workers"
+        # Architektur-Upgrade: Volle dynamische Plugin-Dependency
+        self.plugin_manager = PluginManager()
         self.temp_dir = Path(tempfile.gettempdir()) / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_python_executable(self, worker_name: str) -> Path:
-        """Sucht den Python-Interpreter des isolierten Workers."""
-        worker_venv = self.workers_dir / worker_name / "venv"
+    def _run_worker(self, manifest: WorkerManifest, args: List[str]) -> bool:
+        """Führt einen isolierten Worker mit striktem Timeout (Defensive) aus."""
+        script_path = manifest.worker_dir / manifest.script
+        worker_venv = manifest.worker_dir / "venv"
+
         py_exe = (
             worker_venv / "Scripts" / "python.exe"
             if sys.platform == "win32"
             else worker_venv / "bin" / "python"
         )
-        return py_exe if py_exe.exists() else Path(sys.executable)
+        if not py_exe.exists():
+            py_exe = Path(sys.executable)
 
-    def _run_worker(self, worker_name: str, script_name: str, args: List[str]) -> bool:
-        """Führt einen isolierten Worker aus."""
-        script_path = self.workers_dir / worker_name / script_name
-        if not script_path.exists():
-            return False
-
-        cmd = [str(self._get_python_executable(worker_name)), str(script_path)]
+        cmd = [str(py_exe), str(script_path)]
         cmd.extend(args)
 
-        # 🚀 FIX FÜR CRASH CODE 103 (PyInstaller Venv Dependency Hell Prevention)
-        # Löscht die von PyInstaller injizierten Pfade, damit die Worker
-        # ihre eigenen Standard-Bibliotheken (encodings, etc.) laden können!
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
 
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
+            # 🚀 ARCHITEKTUR-UPGRADE: Timeout schützt vor Zombie-Prozessen
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=manifest.timeout_sec,
+            )
             return True
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "❌ Worker '%s' hat das Timeout (%ss) überschritten und wurde gekillt!",
+                manifest.name,
+                manifest.timeout_sec,
+            )
+            return False
         except subprocess.CalledProcessError as e:
             logger.error(
                 "❌ Worker '%s' ist abgestürzt (Code %s).",
-                worker_name,
+                manifest.name,
                 e.returncode,
             )
             logger.debug(e.stderr)
@@ -167,7 +168,6 @@ class SemanticOrchestrator:
                     else:
                         el["alt_text"] = "Abbildung"
 
-    # pylint: disable=too-many-locals
     def _translate_content(
         self,
         spatial_dom: Dict[str, Any],
@@ -199,11 +199,14 @@ class SemanticOrchestrator:
         with open(in_json, "w", encoding="utf-8") as f:
             json.dump(texts_to_translate, f, ensure_ascii=False, indent=2)
 
-        args = ["--input", str(in_json), "--output", str(out_json), "--lang", doc_lang]
+        manifest = self.plugin_manager.get_worker("translation_worker")
+        if manifest:
+            logger.info("▶ Starte Spezialist: 'translation_worker'...")
+            args = ["--input", str(in_json), "--output", str(out_json)]
+            if manifest.requires_lang:
+                args.extend(["--lang", doc_lang])
 
-        logger.info("▶ Starte Spezialist: 'translation_worker'...")
-        if self._run_worker("translation_worker", "run_translation.py", args):
-            if out_json.exists():
+            if self._run_worker(manifest, args) and out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
                     trans_results = json.load(f)
 
@@ -356,14 +359,31 @@ class SemanticOrchestrator:
     def _process_images(
         self, spatial_dom: Dict[str, Any], job_dir: Path
     ) -> Dict[str, Tuple[Image.Image, str]]:
-        """Lässt den Vision-Worker Alt-Texte generieren."""
+        """Lässt den Vision-Worker Alt-Texte generieren (Manifest-gesteuert)."""
         images_dict = {}
         image_paths = spatial_dom.get("images", {})
-
         if not image_paths:
             return images_dict
 
-        alt_texts = get_image_descriptions(image_paths, job_dir)
+        input_json = job_dir / "vision_input.json"
+        output_json = job_dir / "vision_output.json"
+
+        with open(input_json, "w", encoding="utf-8") as f:
+            json.dump(image_paths, f, ensure_ascii=False, indent=2)
+
+        manifest = self.plugin_manager.get_worker("vision_worker")
+        if manifest:
+            logger.info("▶ Starte Spezialist: 'vision_worker'...")
+            args = ["--input", str(input_json), "--output", str(output_json)]
+            self._run_worker(manifest, args)
+        else:
+            logger.warning("⚠️ Vision-Worker nicht gefunden.")
+
+        alt_texts = {}
+        if output_json.exists():
+            with open(output_json, "r", encoding="utf-8") as f:
+                alt_texts = json.load(f)
+
         for img_name, img_path_str in image_paths.items():
             img_path = Path(img_path_str)
             if not img_path.exists():
@@ -392,36 +412,24 @@ class SemanticOrchestrator:
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
-        experts = [
-            ("layout_worker", "run_layout.py"),
-            ("table_worker", "run_tables.py"),
-            ("signature_worker", "run_signatures.py"),
-            ("form_worker", "run_forms.py"),
-            ("formula_worker", "run_formula.py"),
-            ("footnote_worker", "run_footnote.py"),
-        ]
-
-        # 1. MAP PHASE (Experten-Analyse)
-        for worker_name, script_name in experts:
-            target_json = job_dir / f"{worker_name}_result.json"
+        # 1. MAP PHASE (Gesteuert durch dynamische Manifeste)
+        for worker in self.plugin_manager.get_map_workers():
+            target_json = job_dir / f"{worker.name}_result.json"
             worker_args = ["--input", str(input_path), "--output", str(target_json)]
 
-            if diagnostics.force_ocr_extraction and worker_name == "layout_worker":
+            if worker.accepts_force_ocr and diagnostics.force_ocr_extraction:
                 worker_args.append("--force-ocr")
 
-            if worker_name == "table_worker":
+            if worker.requires_lang:
                 worker_args.extend(["--lang", doc_lang])
 
-            logger.info("▶ Starte Spezialist: '%s'...", worker_name)
-            if (
-                self._run_worker(worker_name, script_name, worker_args)
-                and target_json.exists()
-            ):
+            logger.info("▶ Starte Spezialist: '%s'...", worker.name)
+            if self._run_worker(worker, worker_args) and target_json.exists():
                 with open(target_json, "r", encoding="utf-8") as f:
-                    blackboard_results[worker_name] = json.load(f)
-                logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker_name)
+                    blackboard_results[worker.name] = json.load(f)
+                logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker.name)
             else:
-                logger.warning("⚠️ '%s' lieferte kein Ergebnis.", worker_name)
+                logger.warning("⚠️ '%s' lieferte kein Ergebnis.", worker.name)
 
         # 2. REDUCE PHASE (Sensor Fusion)
         if "layout_worker" not in blackboard_results:

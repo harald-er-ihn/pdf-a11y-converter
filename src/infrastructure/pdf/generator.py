@@ -18,7 +18,7 @@ from weasyprint import HTML as WeasyHTML
 from weasyprint.text.fonts import FontConfiguration
 
 from src.repair import remove_control_characters
-from src.validation import check_verapdf
+from src.infrastructure.validation.validation import check_verapdf
 
 logger = logging.getLogger("pdf-converter")
 

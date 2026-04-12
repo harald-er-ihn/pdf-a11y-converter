@@ -17,9 +17,9 @@ from pathlib import Path
 os.environ["GIO_USE_VFS"] = "local"
 os.environ["GLIB_LOG_LEVEL"] = "4"
 
-from src.engine import extract_to_spatial
-from src.generator import generate_pdf_from_spatial
-from src.validation import check_verapdf, get_verapdf_version
+from src.application.orchestrator import extract_to_spatial
+from src.infrastructure.pdf.generator import generate_pdf_from_spatial
+from src.infrastructure.validation.validation import check_verapdf, get_verapdf_version
 from src.vsr_generator import generate_physical_vsr
 
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")

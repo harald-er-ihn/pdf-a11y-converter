@@ -26,9 +26,9 @@ from PIL import Image
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 # Backend-Importe
-from src.engine import extract_to_spatial
-from src.generator import generate_pdf_from_spatial
-from src.validation import check_verapdf, get_verapdf_version
+from src.application.orchestrator import extract_to_spatial
+from src.infrastructure.pdf.generator import generate_pdf_from_spatial
+from src.infrastructure.validation.validation import check_verapdf, get_verapdf_version
 from src.config import get_worker_python
 from src.vsr_generator import generate_physical_vsr
 

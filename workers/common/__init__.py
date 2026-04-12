@@ -12,9 +12,11 @@ application code (src/).
 from .cleanup import cleanup_memory
 from .logging_utils import setup_worker_logging
 from .torch_utils import configure_torch_runtime
+from .error_contract import write_error_contract
 
 __all__ = [
     "cleanup_memory",
     "setup_worker_logging",
     "configure_torch_runtime",
+    "write_error_contract",
 ]

@@ -46,7 +46,6 @@ def _get_pdf_lang(input_path: Path) -> str:
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug("XMP-Sprache nicht lesbar: %s", e)
 
-    # Fallback: KI-Spracherkennung, falls Metadaten fehlen!
     try:
         import fitz  # pylint: disable=import-outside-toplevel
         from langdetect import detect  # pylint: disable=import-outside-toplevel
@@ -99,7 +98,6 @@ class SemanticOrchestrator:
     """Orchestriert die isolierten Experten-Worker."""
 
     def __init__(self) -> None:
-        # Architektur-Upgrade: Volle dynamische Plugin-Dependency
         self.plugin_manager = PluginManager()
         self.temp_dir = Path(tempfile.gettempdir()) / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +123,6 @@ class SemanticOrchestrator:
         env.pop("PYTHONPATH", None)
 
         try:
-            # 🚀 ARCHITEKTUR-UPGRADE: Timeout schützt vor Zombie-Prozessen
             subprocess.run(
                 cmd,
                 check=True,
@@ -143,12 +140,7 @@ class SemanticOrchestrator:
             )
             return False
         except subprocess.CalledProcessError as e:
-            logger.error(
-                "❌ Worker '%s' ist abgestürzt (Code %s).",
-                manifest.name,
-                e.returncode,
-            )
-            logger.debug(e.stderr)
+            logger.debug("Subprozess Crash: %s", e.stderr)
             return False
 
     def _assign_alt_texts_to_dom(
@@ -206,29 +198,36 @@ class SemanticOrchestrator:
             if manifest.requires_lang:
                 args.extend(["--lang", doc_lang])
 
-            if self._run_worker(manifest, args) and out_json.exists():
+            success = self._run_worker(manifest, args)
+
+            # 🚀 Error Contract Auswertung
+            if out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
-                    trans_results = json.load(f)
+                    worker_data = json.load(f)
 
-                for img_name in list(images_dict.keys()):
-                    if img_name in trans_results:
-                        img_obj, _ = images_dict[img_name]
-                        images_dict[img_name] = (
-                            img_obj,
-                            trans_results[img_name],
-                        )
+                if worker_data.get("status") == "error":
+                    err = worker_data.get("error", {})
+                    logger.warning(
+                        "⚠️ Übersetzer meldet Problem [%s]: %s",
+                        err.get("type", "Unknown"),
+                        err.get("message", ""),
+                    )
+                elif success:
+                    for img_name in list(images_dict.keys()):
+                        if img_name in worker_data:
+                            img_obj, _ = images_dict[img_name]
+                            images_dict[img_name] = (img_obj, worker_data[img_name])
 
-                for p_idx, e_idx, ref_key in dom_alt_refs:
-                    if ref_key in trans_results:
-                        el = spatial_dom["pages"][p_idx]["elements"][e_idx]
-                        el["alt_text"] = trans_results[ref_key]
+                    for p_idx, e_idx, ref_key in dom_alt_refs:
+                        if ref_key in worker_data:
+                            el = spatial_dom["pages"][p_idx]["elements"][e_idx]
+                            el["alt_text"] = worker_data[ref_key]
 
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
     def _merge_signatures(
         self, spatial_dom: Dict[str, Any], signatures: List[Dict[str, Any]]
     ) -> None:
-        """Webt erkannte Unterschriften als Grafiken in den Spatial DOM ein."""
         total_sigs = 0
         for s_page in signatures:
             p_num = s_page.get("page_num")
@@ -238,14 +237,12 @@ class SemanticOrchestrator:
                     dom_page["elements"].extend(s_elements)
                     total_sigs += len(s_elements)
                     break
-
         if total_sigs > 0:
             logger.info("📝 %s Unterschrift(en) ins Dokument integriert.", total_sigs)
 
     def _merge_tables(
         self, spatial_dom: Dict[str, Any], table_pages: List[Dict[str, Any]]
     ) -> None:
-        """Webt Tabellen in den Spatial DOM ein und entfernt Kollisionen."""
         total_tables = 0
         for t_page in table_pages:
             p_num = t_page.get("page_num")
@@ -259,7 +256,6 @@ class SemanticOrchestrator:
                     b_box = base_el.get("bbox", [0, 0, 0, 0])
                     cx = (b_box[0] + b_box[2]) / 2.0
                     cy = (b_box[1] + b_box[3]) / 2.0
-
                     is_in_tab = any(_is_inside(cx, cy, t["bbox"]) for t in t_elements)
                     if not is_in_tab:
                         filtered_elements.append(base_el)
@@ -275,10 +271,8 @@ class SemanticOrchestrator:
     def _merge_forms(
         self, spatial_dom: Dict[str, Any], forms: List[Dict[str, Any]]
     ) -> None:
-        """Webt interaktive Formularfelder als Dummy-Elemente ein."""
         if not forms:
             return
-
         logger.info("📝 Verwebe %s Formularfelder...", len(forms))
         if spatial_dom.get("pages"):
             first_page = spatial_dom["pages"][0]
@@ -294,12 +288,10 @@ class SemanticOrchestrator:
     def _merge_footnotes(
         self, spatial_dom: Dict[str, Any], footnote_pages: List[Dict[str, Any]]
     ) -> None:
-        """Webt erkannte Fußnoten in den Spatial DOM ein."""
         total_notes = 0
         for f_page in footnote_pages:
             p_num = f_page.get("page_num")
             f_elements = f_page.get("elements", [])
-
             for dom_page in spatial_dom.get("pages", []):
                 if dom_page.get("page_num") != p_num:
                     continue
@@ -308,7 +300,6 @@ class SemanticOrchestrator:
                     b_box = base_el.get("bbox", [0, 0, 0, 0])
                     cx = (b_box[0] + b_box[2]) / 2.0
                     cy = (b_box[1] + b_box[3]) / 2.0
-
                     is_fn = any(_is_inside(cx, cy, f["bbox"]) for f in f_elements)
                     if is_fn:
                         base_el["type"] = "Note"
@@ -321,7 +312,6 @@ class SemanticOrchestrator:
     def _merge_formulas(
         self, spatial_dom: Dict[str, Any], formula_data: Dict[str, Any]
     ) -> None:
-        """Ersetzt kaputte OCR-Mülltexte durch echtes LaTeX von Nougat."""
         formula_md = formula_data.get("markdown", "")
         if not formula_md:
             return
@@ -338,7 +328,6 @@ class SemanticOrchestrator:
 
         formula_idx = 0
         replaced_count = 0
-
         for page in spatial_dom.get("pages", []):
             for el in page.get("elements", []):
                 text = el.get("text", "")
@@ -359,7 +348,6 @@ class SemanticOrchestrator:
     def _process_images(
         self, spatial_dom: Dict[str, Any], job_dir: Path
     ) -> Dict[str, Tuple[Image.Image, str]]:
-        """Lässt den Vision-Worker Alt-Texte generieren (Manifest-gesteuert)."""
         images_dict = {}
         image_paths = spatial_dom.get("images", {})
         if not image_paths:
@@ -375,14 +363,28 @@ class SemanticOrchestrator:
         if manifest:
             logger.info("▶ Starte Spezialist: 'vision_worker'...")
             args = ["--input", str(input_json), "--output", str(output_json)]
-            self._run_worker(manifest, args)
+            success = self._run_worker(manifest, args)
+
+            # 🚀 Error Contract Auswertung
+            if output_json.exists():
+                with open(output_json, "r", encoding="utf-8") as f:
+                    worker_data = json.load(f)
+
+                if worker_data.get("status") == "error":
+                    err = worker_data.get("error", {})
+                    logger.warning(
+                        "⚠️ Vision-KI meldet Problem [%s]: %s",
+                        err.get("type", "Unknown"),
+                        err.get("message", ""),
+                    )
+            elif not success:
+                logger.warning("⚠️ 'vision_worker' unerwartet abgestürzt.")
         else:
             logger.warning("⚠️ Vision-Worker nicht gefunden.")
 
         alt_texts = {}
-        if output_json.exists():
-            with open(output_json, "r", encoding="utf-8") as f:
-                alt_texts = json.load(f)
+        if output_json.exists() and "status" not in worker_data:
+            alt_texts = worker_data
 
         for img_name, img_path_str in image_paths.items():
             img_path = Path(img_path_str)
@@ -403,7 +405,6 @@ class SemanticOrchestrator:
     def extract(
         self, input_path: Path, doc_lang: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Führt die Orchestrierung via Blackboard-Pattern durch."""
         job_id = f"job_{uuid.uuid4().hex[:8]}"
         job_dir = self.temp_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -412,7 +413,7 @@ class SemanticOrchestrator:
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
-        # 1. MAP PHASE (Gesteuert durch dynamische Manifeste)
+        # 1. MAP PHASE
         for worker in self.plugin_manager.get_map_workers():
             target_json = job_dir / f"{worker.name}_result.json"
             worker_args = ["--input", str(input_path), "--output", str(target_json)]
@@ -424,12 +425,26 @@ class SemanticOrchestrator:
                 worker_args.extend(["--lang", doc_lang])
 
             logger.info("▶ Starte Spezialist: '%s'...", worker.name)
-            if self._run_worker(worker, worker_args) and target_json.exists():
+            success = self._run_worker(worker, worker_args)
+
+            # 🚀 Error Contract Auswertung
+            if target_json.exists():
                 with open(target_json, "r", encoding="utf-8") as f:
-                    blackboard_results[worker.name] = json.load(f)
-                logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker.name)
-            else:
-                logger.warning("⚠️ '%s' lieferte kein Ergebnis.", worker.name)
+                    worker_data = json.load(f)
+
+                if worker_data.get("status") == "error":
+                    err = worker_data.get("error", {})
+                    logger.warning(
+                        "⚠️ Experte '%s' meldet Problem [%s]: %s",
+                        worker.name,
+                        err.get("type", "Unknown"),
+                        err.get("message", "Keine Details"),
+                    )
+                elif success:
+                    blackboard_results[worker.name] = worker_data
+                    logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker.name)
+            elif not success:
+                logger.warning("⚠️ '%s' unerwartet abgestürzt.", worker.name)
 
         # 2. REDUCE PHASE (Sensor Fusion)
         if "layout_worker" not in blackboard_results:

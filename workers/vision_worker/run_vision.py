@@ -3,7 +3,7 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für die Bildbeschreibung (BLIP).
-Gibt die Ergebnisse strikt als JSON zurück.
+Fängt GPU OOM-Errors sauber per Contract ab.
 """
 
 import argparse
@@ -11,19 +11,19 @@ import json
 import sys
 from pathlib import Path
 
-# 🚀 SYSTEM-PATH FIX: Erlaubt den Import von 'common', ohne dass wir
-# src/ oder das Root-Verzeichnis injizieren müssen!
+# 🚀 SYSTEM-PATH FIX
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-# Jetzt können wir unseren neuen, isolierten Common-Code nutzen
-from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+from common import (
+    cleanup_memory,
+    configure_torch_runtime,
+    setup_worker_logging,
+    write_error_contract,
+)
 
-# 1. Logging initialisieren
 logger = setup_worker_logging("vision-worker")
-
-# 2. PyTorch & C++ Threads in Ketten legen (Verhindert VM-Freezes)
 configure_torch_runtime()
 
 import torch  # pylint: disable=wrong-import-position
@@ -86,17 +86,24 @@ def main() -> None:
         logger.info("✅ Vision-Extraktion erfolgreich abgeschlossen.")
 
     except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.error("❌ Fataler Fehler im Vision-Worker: %s", e)
+        # 🚀 OOM ERROR ABFANGEN!
+        if "OutOfMemoryError" in type(e).__name__:
+            logger.error("❌ GPU Out of Memory im Vision-Worker!")
+            write_error_contract(
+                output_json,
+                "OutOfMemory",
+                "Grafikkartenspeicher (VRAM) ist voll. Fallback auf Standard-Alt-Texte.",
+            )
+        else:
+            logger.error("❌ Fataler Fehler im Vision-Worker: %s", e)
+            write_error_contract(output_json, type(e).__name__, str(e))
         sys.exit(1)
 
     finally:
-        # 🚀 ENTERPRISE MEMORY CLEANUP:
-        # Zuerst lokale Referenzen zerstören, DANN aufräumen
         if model is not None:
             del model
         if processor is not None:
             del processor
-
         cleanup_memory(aggressive=True)
 
 

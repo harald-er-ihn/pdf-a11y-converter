@@ -49,10 +49,10 @@ def main() -> None:
     group_debug.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose Mode."
     )
+    # 🚀 FIX: action="store_true" verhindert, dass argparse das PDF als Parameter frisst
     group_debug.add_argument(
         "--visualscreenreader",
-        nargs="?",
-        const="DEFAULT",
+        action="store_true",
         help="Erzeugt eine textuelle Screenreader-Vorschau (.html)",
     )
 
@@ -107,11 +107,8 @@ def main() -> None:
 
     # ... dann den fertigen Output-Baum als HTML ausgeben
     if args.visualscreenreader:
-        vsr_path = (
-            Path(args.visualscreenreader)
-            if args.visualscreenreader != "DEFAULT"
-            else out_path.with_suffix(".visualscreenreader.html")
-        )
+        # 🚀 FIX: Pfad wird nun automatisch abgeleitet
+        vsr_path = out_path.with_suffix(".visualscreenreader.html")
 
         logger.info("👁️ Generiere Visual Screenreader aus dem fertigen PDF/UA...")
         success = generate_physical_vsr(out_path, vsr_path)

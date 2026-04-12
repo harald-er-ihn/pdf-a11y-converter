@@ -23,6 +23,7 @@ IGNORE_DIRS = {
     "dist",
     "TU_Dortmund_Corporate_Design",
     "models_local",
+    "build_temp",
     ".vscode",
     "resources",  # Zu viele Binaries
 }

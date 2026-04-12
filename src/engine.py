@@ -83,7 +83,6 @@ def _extract_original_metadata(input_path: Path) -> dict[str, str]:
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug("Konnte Original-Metadaten nicht lesen: %s", e)
 
-    # 🚀 PAC26 Fix: Fallback-Titel aus dem Dateinamen erzeugen!
     if not meta.get("/Title"):
         meta["/Title"] = input_path.stem.replace("_", " ")
 
@@ -109,9 +108,6 @@ class SemanticOrchestrator:
     def __init__(self) -> None:
         self.base_dir = _get_app_base_dir()
         self.workers_dir = self.base_dir / "workers"
-
-        # 🚀 FIX: OS-Temp-Verzeichnis nutzen, um WinError 5 (Zugriff verweigert)
-        # im Program Files Verzeichnis bei Enterprise-Deployments zu verhindern!
         self.temp_dir = Path(tempfile.gettempdir()) / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,16 +165,12 @@ class SemanticOrchestrator:
         doc_lang: str,
         job_dir: Path,
     ) -> None:
-        """
-        Übersetzt Alt-Texte und mappt sie präzise in den Spatial DOM.
-        """
+        """Übersetzt Alt-Texte und mappt sie präzise in den Spatial DOM."""
         texts_to_translate = {}
 
-        # 1. Sammle Bildbeschreibungen aus dem Vision-Worker
         for img_name, (_, alt_text) in images_dict.items():
             texts_to_translate[img_name] = alt_text
 
-        # 2. Sammle vorgegebene Alt-Texte aus dem DOM (z.B. "Signature")
         dom_alt_refs = []
         for p_idx, page in enumerate(spatial_dom.get("pages", [])):
             for e_idx, el in enumerate(page.get("elements", [])):
@@ -205,7 +197,6 @@ class SemanticOrchestrator:
                 with open(out_json, "r", encoding="utf-8") as f:
                     trans_results = json.load(f)
 
-                # Rückführung 1: Bilder-Dictionary aktualisieren
                 for img_name in list(images_dict.keys()):
                     if img_name in trans_results:
                         img_obj, _ = images_dict[img_name]
@@ -214,13 +205,11 @@ class SemanticOrchestrator:
                             trans_results[img_name],
                         )
 
-                # Rückführung 2: Vordefinierte DOM-Elemente aktualisieren
                 for p_idx, e_idx, ref_key in dom_alt_refs:
                     if ref_key in trans_results:
                         el = spatial_dom["pages"][p_idx]["elements"][e_idx]
                         el["alt_text"] = trans_results[ref_key]
 
-        # Rückführung 3: (Egal ob Translation geklappt hat) -> Map in den DOM
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
     def _merge_signatures(
@@ -394,13 +383,13 @@ class SemanticOrchestrator:
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
 
+        # 🚀 FIX: Vision und Translation Worker dürfen NICHT in der Map-Phase (PDF-Input)
+        # aufgerufen werden. Sie werden in der Reduce-Phase mit JSON-Inputs orchestriert!
         experts = [
             ("layout_worker", "run_layout.py"),
             ("table_worker", "run_tables.py"),
             ("signature_worker", "run_signatures.py"),
             ("form_worker", "run_forms.py"),
-            ("vision_worker", "run_vision.py"),
-            ("translation_worker", "run_translation.py"),
             ("formula_worker", "run_formula.py"),
             ("footnote_worker", "run_footnote.py"),
         ]
@@ -458,9 +447,8 @@ class SemanticOrchestrator:
             frm_fields = blackboard_results["form_worker"].get("fields", [])
             self._merge_forms(spatial_dom, frm_fields)
 
+        # 🚀 Die Vision- und Translations-Pipeline wird HIER orchestriert!
         images_dict = self._process_images(spatial_dom, job_dir)
-
-        # 🚀 TRANSLATION PHASE
         self._translate_content(spatial_dom, images_dict, doc_lang, job_dir)
 
         spatial_dom = repair_spatial_dom(spatial_dom, input_path)
@@ -479,14 +467,11 @@ def extract_to_spatial(
     pdf_path = Path(input_path)
     logger.info("✨ Starte Orchestrierung für %s...", pdf_path.name)
 
-    # 🚀 Dynamische Sprach-Erkennung (Fallback auf langdetect)
     doc_lang = _get_pdf_lang(pdf_path)
     logger.info("🗣️ Dokumenten-Sprache erkannt: %s", doc_lang)
 
     pipeline = SemanticOrchestrator()
     spatial_dom, images_dict = pipeline.extract(pdf_path, doc_lang)
-
-    # 🚀 Dynamische Titel-Erkennung (Fallback auf Dateiname)
     orig_meta = _extract_original_metadata(pdf_path)
 
     return spatial_dom, images_dict, doc_lang, orig_meta

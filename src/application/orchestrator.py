@@ -4,7 +4,7 @@
 """
 Der Semantic Orchestrator.
 Leitet die PDF-Analyse, ruft isolierte Worker-Prozesse auf und sammelt.
-Implementiert das Blackboard-Pattern und die Sensor-Fusion (Merge-Phase).
+Implementiert das Blackboard-Pattern, Sensor-Fusion und den Audit Trail.
 """
 
 import json
@@ -15,7 +15,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple, List, Any
 
@@ -30,7 +32,6 @@ logger = logging.getLogger("pdf-converter")
 
 
 def _get_pdf_lang(input_path: Path) -> str:
-    """Ermittelt die Sprache (via Metadaten oder KI-Erkennung)."""
     try:
         with pikepdf.open(str(input_path)) as pdf:
             if "/Lang" in pdf.Root:
@@ -67,7 +68,6 @@ def _get_pdf_lang(input_path: Path) -> str:
 
 
 def _extract_original_metadata(input_path: Path) -> dict[str, str]:
-    """Extrahiert PDF-Metadaten inkl. Dateinamen-Fallback für den Titel."""
     meta: dict[str, str] = {}
     try:
         with pikepdf.open(str(input_path)) as pdf:
@@ -90,7 +90,6 @@ def _extract_original_metadata(input_path: Path) -> dict[str, str]:
 
 
 def _is_inside(center_x: float, center_y: float, box: List[float]) -> bool:
-    """Prüft, ob ein Mittelpunkt (x,y) innerhalb einer Bounding Box liegt."""
     return box[0] <= center_x <= box[2] and box[1] <= center_y <= box[3]
 
 
@@ -103,7 +102,6 @@ class SemanticOrchestrator:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def _run_worker(self, manifest: WorkerManifest, args: List[str]) -> bool:
-        """Führt einen isolierten Worker aus. Setzt Telemetrie-Blocker (Option A)."""
         script_path = manifest.worker_dir / manifest.script
         worker_venv = manifest.worker_dir / "venv"
 
@@ -115,7 +113,9 @@ class SemanticOrchestrator:
 
         if not py_exe.exists():
             if getattr(sys, "frozen", False):
-                logger.error("❌ FATAL: Worker Venv fehlt im kompilierten Build (%s)!", py_exe)
+                logger.error(
+                    "❌ FATAL: Worker Venv fehlt im kompilierten Build (%s)!", py_exe
+                )
                 return False
             py_exe = Path(sys.executable)
 
@@ -125,17 +125,11 @@ class SemanticOrchestrator:
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
-
-        # 🚀 OPTION A: Telemetrie-freie Runtime-Isolation
         env["HF_HUB_OFFLINE"] = "1"
         env["HF_HUB_DISABLE_TELEMETRY"] = "1"
         env["DISABLE_TELEMETRY"] = "1"
-        env["DO_NOT_TRACK"] = "1"
-        env["ANONYMIZED_TELEMETRY"] = "False"
-        env["HUGGINGFACE_CO_RESOLVE_ENDPOINT"] = "0"
 
         try:
-            # 🚀 FIX: encoding="utf-8" ist überlebenswichtig auf Windows wegen Emojis!
             subprocess.run(
                 cmd,
                 check=True,
@@ -148,19 +142,14 @@ class SemanticOrchestrator:
             return True
         except subprocess.TimeoutExpired:
             logger.error(
-                "❌ Worker '%s' hat das Timeout (%ss) überschritten und wurde gekillt!",
-                manifest.name,
-                manifest.timeout_sec,
+                "❌ Timeout (%ss) in '%s'.", manifest.timeout_sec, manifest.name
             )
             return False
         except subprocess.CalledProcessError as e:
-            # 🚀 FIX: Echten Crash-Log für den Admin sichtbar machen!
-            logger.error("❌ Subprozess Crash in '%s' (Code %s)", manifest.name, e.returncode)
-            if e.stderr:
-                logger.error("--- WORKER ERROR LOG ---\n%s", e.stderr.strip())
+            logger.error("❌ Crash in '%s' (Code %s)", manifest.name, e.returncode)
             return False
         except Exception as e:
-            logger.error("❌ Systemfehler beim Starten von '%s': %s", manifest.name, e)
+            logger.error("❌ Systemfehler bei '%s': %s", manifest.name, e)
             return False
 
     def _assign_alt_texts_to_dom(
@@ -185,6 +174,7 @@ class SemanticOrchestrator:
         images_dict: Dict[str, Tuple[Image.Image, str]],
         doc_lang: str,
         job_dir: Path,
+        audit_trail: Dict[str, Any],
     ) -> None:
         texts_to_translate = {}
         for img_name, (_, alt_text) in images_dict.items():
@@ -215,19 +205,20 @@ class SemanticOrchestrator:
             if manifest.requires_lang:
                 args.extend(["--lang", doc_lang])
 
+            t_start = time.time()
             success = self._run_worker(manifest, args)
+            audit_trail["workers"][manifest.name] = {
+                "status": "success" if success else "error",
+                "duration_sec": round(time.time() - t_start, 2),
+            }
 
             if out_json.exists():
                 with open(out_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)
 
                 if worker_data.get("status") == "error":
-                    err = worker_data.get("error", {})
-                    logger.warning(
-                        "⚠️ Übersetzer meldet Problem [%s]: %s",
-                        err.get("type", "Unknown"),
-                        err.get("message", ""),
-                    )
+                    audit_err = worker_data["error"]
+                    audit_trail["workers"][manifest.name]["error_details"] = audit_err
                 elif success:
                     for img_name in list(images_dict.keys()):
                         if img_name in worker_data:
@@ -242,58 +233,37 @@ class SemanticOrchestrator:
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
     def _merge_signatures(
-        self, spatial_dom: Dict[str, Any], signatures: List[Dict[str, Any]]
+        self, spatial_dom: Dict[str, Any], signatures: List[Dict]
     ) -> None:
-        total_sigs = 0
         for s_page in signatures:
             p_num = s_page.get("page_num")
-            s_elements = s_page.get("elements", [])
             for dom_page in spatial_dom.get("pages", []):
                 if dom_page.get("page_num") == p_num:
-                    dom_page["elements"].extend(s_elements)
-                    total_sigs += len(s_elements)
+                    dom_page["elements"].extend(s_page.get("elements", []))
                     break
-        if total_sigs > 0:
-            logger.info("📝 %s Unterschrift(en) ins Dokument integriert.", total_sigs)
 
     def _merge_tables(
-        self, spatial_dom: Dict[str, Any], table_pages: List[Dict[str, Any]]
+        self, spatial_dom: Dict[str, Any], table_pages: List[Dict]
     ) -> None:
-        total_tables = 0
         for t_page in table_pages:
             p_num = t_page.get("page_num")
             t_elements = t_page.get("elements", [])
             for dom_page in spatial_dom.get("pages", []):
-                if dom_page.get("page_num") != p_num:
-                    continue
+                if dom_page.get("page_num") == p_num:
+                    filtered = []
+                    for base_el in dom_page.get("elements", []):
+                        b_box = base_el.get("bbox", [0, 0, 0, 0])
+                        cx = (b_box[0] + b_box[2]) / 2.0
+                        cy = (b_box[1] + b_box[3]) / 2.0
+                        if not any(_is_inside(cx, cy, t["bbox"]) for t in t_elements):
+                            filtered.append(base_el)
+                    dom_page["elements"] = filtered + t_elements
+                    break
 
-                filtered_elements = []
-                for base_el in dom_page.get("elements", []):
-                    b_box = base_el.get("bbox", [0, 0, 0, 0])
-                    cx = (b_box[0] + b_box[2]) / 2.0
-                    cy = (b_box[1] + b_box[3]) / 2.0
-                    is_in_tab = any(_is_inside(cx, cy, t["bbox"]) for t in t_elements)
-                    if not is_in_tab:
-                        filtered_elements.append(base_el)
-
-                dom_page["elements"] = filtered_elements
-                dom_page["elements"].extend(t_elements)
-                total_tables += len(t_elements)
-                break
-
-        if total_tables > 0:
-            logger.info("📝 %s Tabellen integriert.", total_tables)
-
-    def _merge_forms(
-        self, spatial_dom: Dict[str, Any], forms: List[Dict[str, Any]]
-    ) -> None:
-        if not forms:
-            return
-        logger.info("📝 Verwebe %s Formularfelder...", len(forms))
-        if spatial_dom.get("pages"):
-            first_page = spatial_dom["pages"][0]
+    def _merge_forms(self, spatial_dom: Dict[str, Any], forms: List[Dict]) -> None:
+        if forms and spatial_dom.get("pages"):
             for field in forms:
-                first_page["elements"].append(
+                spatial_dom["pages"][0]["elements"].append(
                     {
                         "type": "p",
                         "text": f"Feld: {field['name']} ({field['alt_text']})",
@@ -302,28 +272,20 @@ class SemanticOrchestrator:
                 )
 
     def _merge_footnotes(
-        self, spatial_dom: Dict[str, Any], footnote_pages: List[Dict[str, Any]]
+        self, spatial_dom: Dict[str, Any], footnote_pages: List[Dict]
     ) -> None:
-        total_notes = 0
         for f_page in footnote_pages:
             p_num = f_page.get("page_num")
             f_elements = f_page.get("elements", [])
             for dom_page in spatial_dom.get("pages", []):
-                if dom_page.get("page_num") != p_num:
-                    continue
-
-                for base_el in dom_page.get("elements", []):
-                    b_box = base_el.get("bbox", [0, 0, 0, 0])
-                    cx = (b_box[0] + b_box[2]) / 2.0
-                    cy = (b_box[1] + b_box[3]) / 2.0
-                    is_fn = any(_is_inside(cx, cy, f["bbox"]) for f in f_elements)
-                    if is_fn:
-                        base_el["type"] = "Note"
-                        total_notes += 1
-                break
-
-        if total_notes > 0:
-            logger.info("📝 %s Textblöcke als Fußnote markiert.", total_notes)
+                if dom_page.get("page_num") == p_num:
+                    for base_el in dom_page.get("elements", []):
+                        b_box = base_el.get("bbox", [0, 0, 0, 0])
+                        cx = (b_box[0] + b_box[2]) / 2.0
+                        cy = (b_box[1] + b_box[3]) / 2.0
+                        if any(_is_inside(cx, cy, f["bbox"]) for f in f_elements):
+                            base_el["type"] = "Note"
+                    break
 
     def _merge_formulas(
         self, spatial_dom: Dict[str, Any], formula_data: Dict[str, Any]
@@ -332,18 +294,15 @@ class SemanticOrchestrator:
         if not formula_md:
             return
 
-        latex_formulas = []
-        matches = re.finditer(
-            r"(\$\$|\\\[|\\\()(.*?)(\$\$|\\\]|\\\))", formula_md, flags=re.DOTALL
-        )
-        for m in matches:
-            latex_formulas.append(m.group(2).strip())
+        regex = r"(\$\$|\\\[|\\\()(.*?)(\$\$|\\\]|\\\))"
+        latex_formulas = [
+            m.group(2).strip() for m in re.finditer(regex, formula_md, flags=re.DOTALL)
+        ]
 
         if not latex_formulas:
             return
 
         formula_idx = 0
-        replaced_count = 0
         for page in spatial_dom.get("pages", []):
             for el in page.get("elements", []):
                 text = el.get("text", "")
@@ -356,13 +315,9 @@ class SemanticOrchestrator:
                         el["text"] = f"$$ {latex_formulas[formula_idx]} $$"
                         el["type"] = "p"
                         formula_idx += 1
-                        replaced_count += 1
-
-        if replaced_count > 0:
-            logger.info("📝 %s Formeln eingewoben.", replaced_count)
 
     def _process_images(
-        self, spatial_dom: Dict[str, Any], job_dir: Path
+        self, spatial_dom: Dict[str, Any], job_dir: Path, audit_trail: Dict[str, Any]
     ) -> Dict[str, Tuple[Image.Image, str]]:
         images_dict = {}
         image_paths = spatial_dom.get("images", {})
@@ -376,30 +331,31 @@ class SemanticOrchestrator:
             json.dump(image_paths, f, ensure_ascii=False, indent=2)
 
         manifest = self.plugin_manager.get_worker("vision_worker")
+        worker_data = {}
+
         if manifest:
             logger.info("▶ Starte Spezialist: 'vision_worker'...")
             args = ["--input", str(input_json), "--output", str(output_json)]
+
+            t_start = time.time()
             success = self._run_worker(manifest, args)
+            audit_trail["workers"][manifest.name] = {
+                "status": "success" if success else "error",
+                "duration_sec": round(time.time() - t_start, 2),
+            }
 
             if output_json.exists():
                 with open(output_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)
-
                 if worker_data.get("status") == "error":
-                    err = worker_data.get("error", {})
-                    logger.warning(
-                        "⚠️ Vision-KI meldet Problem [%s]: %s",
-                        err.get("type", "Unknown"),
-                        err.get("message", ""),
-                    )
-            elif not success:
-                logger.warning("⚠️ 'vision_worker' unerwartet abgestürzt.")
-        else:
-            logger.warning("⚠️ Vision-Worker nicht gefunden.")
+                    audit_err = worker_data["error"]
+                    audit_trail["workers"][manifest.name]["error_details"] = audit_err
 
-        alt_texts = {}
-        if output_json.exists() and "status" not in worker_data:
-            alt_texts = worker_data
+        alt_texts = (
+            worker_data
+            if (output_json.exists() and "status" not in worker_data)
+            else {}
+        )
 
         for img_name, img_path_str in image_paths.items():
             img_path = Path(img_path_str)
@@ -412,21 +368,37 @@ class SemanticOrchestrator:
                         img.copy(),
                         alt_texts.get(img_name, "Bild"),
                     )
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("Fehler beim Laden von Bild %s: %s", img_name, e)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
         return images_dict
 
-    def extract(
-        self, input_path: Path, doc_lang: str
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def extract(self, input_path: Path, doc_lang: str) -> Tuple[Dict, Dict, Dict]:
+        """Führt die Orchestrierung durch und schreibt den Audit-Trail."""
         job_id = f"job_{uuid.uuid4().hex[:8]}"
         job_dir = self.temp_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        blackboard_results = {}
         scanner = PDFPreflightScanner(input_path)
         diagnostics = scanner.analyze()
+
+        audit_trail: Dict[str, Any] = {
+            "metadata": {
+                "filename": input_path.name,
+                "timestamp": datetime.now().isoformat(),
+                "language": doc_lang,
+                "job_id": job_id,
+            },
+            "diagnostics": {
+                "is_tagged": diagnostics.is_tagged,
+                "has_type3_fonts": diagnostics.has_type3_fonts,
+                "needs_visual_reconstruction": diagnostics.needs_visual_reconstruction,
+                "force_ocr": diagnostics.force_ocr_extraction,
+            },
+            "workers": {},
+        }
+
+        blackboard_results = {}
 
         # 1. MAP PHASE
         for worker in self.plugin_manager.get_map_workers():
@@ -435,86 +407,78 @@ class SemanticOrchestrator:
 
             if worker.accepts_force_ocr and diagnostics.force_ocr_extraction:
                 worker_args.append("--force-ocr")
-
             if worker.requires_lang:
                 worker_args.extend(["--lang", doc_lang])
 
             logger.info("▶ Starte Spezialist: '%s'...", worker.name)
+            t_start = time.time()
             success = self._run_worker(worker, worker_args)
+            duration = round(time.time() - t_start, 2)
+
+            audit_trail["workers"][worker.name] = {
+                "status": "success" if success else "error",
+                "duration_sec": duration,
+            }
 
             if target_json.exists():
                 with open(target_json, "r", encoding="utf-8") as f:
                     worker_data = json.load(f)
 
                 if worker_data.get("status") == "error":
-                    err = worker_data.get("error", {})
-                    logger.warning(
-                        "⚠️ Experte '%s' meldet Problem [%s]: %s",
-                        worker.name,
-                        err.get("type", "Unknown"),
-                        err.get("message", "Keine Details"),
-                    )
+                    err = worker_data["error"]
+                    audit_trail["workers"][worker.name]["error_details"] = err
                 elif success:
                     blackboard_results[worker.name] = worker_data
-                    logger.info("✅ '%s' dem Blackboard hinzugefügt.", worker.name)
-            elif not success:
-                logger.warning("⚠️ '%s' unerwartet abgestürzt.", worker.name)
+                    logger.info("✅ '%s' fertig (%ss).", worker.name, duration)
 
         # 2. REDUCE PHASE (Sensor Fusion)
         if "layout_worker" not in blackboard_results:
             logger.error("❌ Der Layout-Basis-Worker ist fehlgeschlagen!")
-            if logger.getEffectiveLevel() != logging.DEBUG:
-                shutil.rmtree(job_dir, ignore_errors=True)
-            return {}, {}
+            return {}, {}, audit_trail
 
         spatial_dom = blackboard_results["layout_worker"]
-        spatial_dom["needs_visual_reconstruction"] = (
-            diagnostics.needs_visual_reconstruction
-        )
+        vis_recon = diagnostics.needs_visual_reconstruction
+        spatial_dom["needs_visual_reconstruction"] = vis_recon
 
         if "signature_worker" in blackboard_results:
-            sig_pages = blackboard_results["signature_worker"].get("pages", [])
-            self._merge_signatures(spatial_dom, sig_pages)
-
+            sig = blackboard_results["signature_worker"].get("pages", [])
+            self._merge_signatures(spatial_dom, sig)
         if "table_worker" in blackboard_results:
-            tbl_pages = blackboard_results["table_worker"].get("pages", [])
-            self._merge_tables(spatial_dom, tbl_pages)
-
+            tbl = blackboard_results["table_worker"].get("pages", [])
+            self._merge_tables(spatial_dom, tbl)
         if "formula_worker" in blackboard_results:
             self._merge_formulas(spatial_dom, blackboard_results["formula_worker"])
-
         if "footnote_worker" in blackboard_results:
-            fn_pages = blackboard_results["footnote_worker"].get("pages", [])
-            self._merge_footnotes(spatial_dom, fn_pages)
-
+            fn = blackboard_results["footnote_worker"].get("pages", [])
+            self._merge_footnotes(spatial_dom, fn)
         if "form_worker" in blackboard_results:
-            frm_fields = blackboard_results["form_worker"].get("fields", [])
-            self._merge_forms(spatial_dom, frm_fields)
+            frm = blackboard_results["form_worker"].get("fields", [])
+            self._merge_forms(spatial_dom, frm)
 
-        images_dict = self._process_images(spatial_dom, job_dir)
-        self._translate_content(spatial_dom, images_dict, doc_lang, job_dir)
+        images_dict = self._process_images(spatial_dom, job_dir, audit_trail)
+        self._translate_content(
+            spatial_dom, images_dict, doc_lang, job_dir, audit_trail
+        )
 
         spatial_dom = repair_spatial_dom(spatial_dom, input_path)
 
-        # 3. CLEANUP
         if logger.getEffectiveLevel() != logging.DEBUG:
             shutil.rmtree(job_dir, ignore_errors=True)
 
-        return spatial_dom, images_dict
+        return spatial_dom, images_dict, audit_trail
 
 
 def extract_to_spatial(
     input_path: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, str]]:
-    """Haupt-Einstiegspunkt für die GUI/CLI."""
+) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, str], Dict[str, Any]]:
+    """Haupt-Einstiegspunkt für die GUI/CLI. Gibt nun auch das Audit-Log zurück."""
     pdf_path = Path(input_path)
     logger.info("✨ Starte Orchestrierung für %s...", pdf_path.name)
 
     doc_lang = _get_pdf_lang(pdf_path)
-    logger.info("🗣️ Dokumenten-Sprache erkannt: %s", doc_lang)
-
     pipeline = SemanticOrchestrator()
-    spatial_dom, images_dict = pipeline.extract(pdf_path, doc_lang)
+
+    spatial_dom, images_dict, audit_trail = pipeline.extract(pdf_path, doc_lang)
     orig_meta = _extract_original_metadata(pdf_path)
 
-    return spatial_dom, images_dict, doc_lang, orig_meta
+    return spatial_dom, images_dict, doc_lang, orig_meta, audit_trail

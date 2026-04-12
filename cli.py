@@ -4,16 +4,17 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Kommandozeilen-Interface (CLI) für den PDF A11y Converter.
+Schreibt nun einen sauberen Audit-Trail für Systemadministratoren.
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
 import warnings
 from pathlib import Path
 
-# 🚀 FIX: Unterdrückt lästige GTK/GLib C-Level Warnungen auf Windows
 os.environ["GIO_USE_VFS"] = "local"
 os.environ["GLIB_LOG_LEVEL"] = "4"
 
@@ -30,34 +31,20 @@ def main() -> None:
     """Haupteinstiegspunkt für die Ausführung über die Kommandozeile."""
     parser = argparse.ArgumentParser(
         description="PDF A11y Converter - Experten-Edition (CLI)",
-        epilog="Beispiel: python cli.py dokument.pdf -o output.pdf -v",
         add_help=False,
     )
-
     group_info = parser.add_argument_group("Informationen")
-    group_info.add_argument(
-        "-h", "--help", action="help", default=argparse.SUPPRESS, help="Zeigt Hilfe an."
-    )
-    group_info.add_argument(
-        "--usage", action="store_true", help="Zeigt ein Verwendungsbeispiel an."
-    )
-    group_info.add_argument(
-        "--version", action="version", version="PDF A11y Converter v0.1.0"
-    )
+    group_info.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS)
+    group_info.add_argument("--usage", action="store_true")
+    group_info.add_argument("--version", action="version", version="v0.1.0")
 
     group_args = parser.add_argument_group("Verarbeitung")
-    group_args.add_argument("input", nargs="?", help="Pfad zur Eingabe-PDF")
-    group_args.add_argument("-o", "--output", help="Pfad zur Ausgabe-PDF (optional)")
+    group_args.add_argument("input", nargs="?")
+    group_args.add_argument("-o", "--output")
 
     group_debug = parser.add_argument_group("Debugging")
-    group_debug.add_argument(
-        "-v", "--verbose", action="store_true", help="Verbose Mode."
-    )
-    group_debug.add_argument(
-        "--visualscreenreader",
-        action="store_true",
-        help="Erzeugt eine textuelle Screenreader-Vorschau (.html)",
-    )
+    group_debug.add_argument("-v", "--verbose", action="store_true")
+    group_debug.add_argument("--visualscreenreader", action="store_true")
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -79,44 +66,39 @@ def main() -> None:
     )
     logger = logging.getLogger("pdf-converter")
 
-    out_path = (
-        Path(args.output)
-        if args.output
-        else Path(args.input).with_name(Path(args.input).stem + "_pdfua.pdf")
-    )
-    logger.info("🚀 Starte CLI Konvertierung für: %s", args.input)
+    out_p = Path(args.output) if args.output else Path(args.input)
+    if not args.output:
+        out_p = out_p.with_name(out_p.stem + "_pdfua.pdf")
 
-    verapdf_v = get_verapdf_version()
-    logger.info("🛠️ Validierungs-Software: %s", verapdf_v)
+    audit_path = out_p.with_suffix(".audit.json")
+
+    logger.info("🚀 Starte CLI Konvertierung für: %s", args.input)
+    logger.info("🛠️ Validierungs-Software: %s", get_verapdf_version())
 
     initial_check = check_verapdf(args.input, is_final=False)
 
     if initial_check.get("passed", False):
-        logger.info(
-            "🟢 Fazit: Das Original-PDF ist bereits konform. Verarbeite trotzdem..."
-        )
+        logger.info("🟢 Original-PDF ist konform. Verarbeite trotzdem...")
     else:
-        logger.info(
-            "🔴 Fazit: Das Original-PDF ist NICHT barrierefrei. "
-            "Starte Rekonstruktion..."
-        )
+        logger.info("🔴 Original-PDF ist NICHT barrierefrei. Starte Rekonstruktion...")
 
-    spatial_dom, images, doc_lang, docinfo = extract_to_spatial(args.input)
+    sp_dom, imgs, lang, docinfo, audit = extract_to_spatial(args.input)
 
-    generate_pdf_from_spatial(
-        spatial_dom, args.input, images, str(out_path), docinfo, doc_lang
-    )
+    generate_pdf_from_spatial(sp_dom, args.input, imgs, str(out_p), docinfo, lang)
+
+    # 🚀 ARCHITEKTUR: Endabnahme auf höchster Schicht
+    final_check = check_verapdf(out_p, is_final=True)
+    audit["validation"] = final_check
+    with open(audit_path, "w", encoding="utf-8") as f:
+        json.dump(audit, f, indent=2, ensure_ascii=False)
+
+    logger.info("📊 Audit-Trail geschrieben: %s", audit_path.name)
 
     if args.visualscreenreader:
-        vsr_path = out_path.with_suffix(".visualscreenreader.html")
-
+        vsr_path = out_p.with_suffix(".visualscreenreader.html")
         logger.info("👁️ Generiere Visual Screenreader aus dem fertigen PDF/UA...")
-        success = generate_physical_vsr(out_path, vsr_path)
-
-        if success:
+        if generate_physical_vsr(out_p, vsr_path):
             logger.info("👉 file://%s", vsr_path.absolute())
-        else:
-            logger.warning("⚠️ Konnte keinen VSR generieren.")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ Implementiert saubere Threading-Isolation, Stream-Redirection
 und eine responsive CustomTkinter Oberfläche.
 """
 
+import json
 import logging
 import multiprocessing
 import os
@@ -35,7 +36,6 @@ from src.vsr_generator import generate_physical_vsr
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
 warnings.filterwarnings("ignore", message=".*urllib3.*")
 
-# 🚀 FIX: Unterdrückt lästige GTK/GLib C-Level Warnungen auf Windows
 os.environ["GIO_USE_VFS"] = "local"
 os.environ["GLIB_LOG_LEVEL"] = "4"
 
@@ -277,8 +277,6 @@ class App(CustomTkDnD):
                 "if torch.cuda.is_available() else '')"
             )
 
-            # 🚀 FIX: Isoliere die Umgebung, damit PyInstaller's PYTHONPATH
-            # den Subprozess (das Venv) nicht korrumpiert! (Behebt Code 103)
             env = os.environ.copy()
             env.pop("PYTHONHOME", None)
             env.pop("PYTHONPATH", None)
@@ -322,7 +320,6 @@ class App(CustomTkDnD):
         about_win.geometry("850x650")
         about_win.resizable(True, True)
 
-        # 🚀 FIX: Zwingt das Fenster garantiert vor das Hauptfenster!
         about_win.attributes("-topmost", True)
         about_win.after(150, lambda: about_win.attributes("-topmost", False))
         about_win.focus_force()
@@ -398,27 +395,35 @@ class App(CustomTkDnD):
             logger.info("🔴 Original-PDF ist NICHT barrierefrei.")
 
         try:
-            spatial_dom, images, doc_lang, docinfo = extract_to_spatial(input_path)
-            self._run_phase_3(spatial_dom, images, doc_lang, docinfo)
+            sp_dom, imgs, lang, info, audit = extract_to_spatial(input_path)
+            self._run_phase_3(sp_dom, imgs, lang, info, audit)
         except Exception as e:
             logger.error("Fehler in Phase 1: %s", e)
             self.after(0, self._cancel_process, "Fehler bei der Extraktion.")
 
     def _run_phase_3(
-        self, spatial_dom: dict, images: dict, doc_lang: str, docinfo: dict
+        self, sp_dom: dict, imgs: dict, lang: str, info: dict, audit: dict
     ) -> None:
-        """Generiert das finale PDF und validiert es."""
+        """Generiert das finale PDF und validiert es inklusive Audit Trail."""
         if not self.selected_file:
             return
 
         base, ext = os.path.splitext(self.selected_file)
         output_path = f"{base}_pdfua{ext}"
+        audit_path = f"{base}_pdfua.audit.json"
+
         try:
             success = generate_pdf_from_spatial(
-                spatial_dom, self.selected_file, images, output_path, docinfo, doc_lang
+                sp_dom, self.selected_file, imgs, output_path, info, lang
             )
             if success:
                 self.converted_output_path = output_path
+                final_check = check_verapdf(output_path, is_final=True)
+                audit["validation"] = final_check
+                with open(audit_path, "w", encoding="utf-8") as f:
+                    json.dump(audit, f, indent=2, ensure_ascii=False)
+                logging.getLogger("pdf-converter").info("📊 Audit-Trail gespeichert.")
+
             self.after(0, self._finish, success, output_path)
         except Exception as e:
             logging.getLogger("pdf-converter").error("Fehler Phase 3: %s", e)

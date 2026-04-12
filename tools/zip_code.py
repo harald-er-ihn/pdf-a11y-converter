@@ -18,6 +18,7 @@ IGNORE_DIRS: Set[str] = {
     "__pycache__",
     "output",
     "veraPDF-files",
+    "logs",
     "pdfs",
     "verapdf_local",
     ".idea",
@@ -33,6 +34,7 @@ IGNORE_DIRS: Set[str] = {
 # File extensions to include (Source Code)
 INCLUDE_EXT: Set[str] = {
     ".py",
+    ".ps1",
     ".html",
     ".css",
     ".js",

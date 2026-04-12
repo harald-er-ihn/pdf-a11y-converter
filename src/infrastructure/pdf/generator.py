@@ -18,7 +18,6 @@ from weasyprint import HTML as WeasyHTML
 from weasyprint.text.fonts import FontConfiguration
 
 from src.repair import remove_control_characters
-from src.infrastructure.validation.validation import check_verapdf
 
 logger = logging.getLogger("pdf-converter")
 
@@ -235,6 +234,5 @@ def generate_pdf_from_spatial(
     if os.path.exists(temp_rasterized):
         os.remove(temp_rasterized)
 
-    check_verapdf(output_path, is_final=True)
     logger.info("✅ Visual Fidelity Prozess komplett abgeschlossen!")
     return True

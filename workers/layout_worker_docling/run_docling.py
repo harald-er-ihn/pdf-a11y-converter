@@ -1,10 +1,9 @@
-# PDF A11y Converter - Layout Worker
+# PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
-Isolierter Worker für die Layout-Erkennung.
-Nutzt Docling, um Text, Typen (H1, P, etc.) und exakte Bounding Boxes
-zu extrahieren. Konvertiert die PDF-Koordinaten in Web-Koordinaten.
+Isolierter Primary Worker für die Layout-Erkennung (Docling).
+Extrahiert Text, Typen (H1, P, etc.) und exakte Bounding Boxes.
 """
 
 import argparse
@@ -14,14 +13,18 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-# 🚀 SYSTEM-PATH FIX für common import
+# 🚀 SYSTEM-PATH FIX
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+from common import (
+    cleanup_memory,
+    configure_torch_runtime,
+    setup_worker_logging,
+    write_error_contract,
+)
 
-# 🚀 ENTERPRISE FIX: Zwinge alle KI-Modelle in den freigegebenen User-Ordner
 USER_CACHE = Path.home() / ".pdf-a11y-models"
 USER_CACHE.mkdir(parents=True, exist_ok=True)
 
@@ -31,12 +34,11 @@ os.environ["DATALAB_CACHE_DIR"] = str(USER_CACHE / "datalab")
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["TQDM_DISABLE"] = "1"
 
-logger = setup_worker_logging("layout-worker")
+logger = setup_worker_logging("layout-docling")
 configure_torch_runtime()
 
 
 def _setup_docling(force_ocr: bool) -> Any:
-    """Konfiguriert die Docling Pipeline."""
     from docling.datamodel.base_models import InputFormat  # pylint: disable=import-outside-toplevel
     from docling.datamodel.pipeline_options import PdfPipelineOptions  # pylint: disable=import-outside-toplevel
     from docling.document_converter import DocumentConverter, PdfFormatOption  # pylint: disable=import-outside-toplevel
@@ -59,7 +61,6 @@ def _setup_docling(force_ocr: bool) -> Any:
 
 
 def _extract_images(doc: Any, output_dir: Path) -> Dict[str, str]:
-    """Speichert Bilder aus dem Docling-Dokument."""
     images_dict = {}
     if hasattr(doc, "pictures"):
         for idx, picture in enumerate(doc.pictures):
@@ -81,7 +82,6 @@ def _extract_images(doc: Any, output_dir: Path) -> Dict[str, str]:
 
 
 def _map_docling_type(label_name: str, level: int) -> str:
-    """Mappt Docling-Klassen auf unser internes Format."""
     if label_name == "title" or label_name.startswith("heading"):
         return "h" + str(min(level if level > 0 else 1, 6))
     if label_name == "list_item":
@@ -96,7 +96,6 @@ def _map_docling_type(label_name: str, level: int) -> str:
 def _extract_elements(
     doc: Any, page_heights: Dict[int, float], spatial_dom: Dict
 ) -> None:
-    """Verarbeitet die rohen Docling-Items und webt sie in das Spatial-DOM ein."""
     for item, level in doc.iterate_items():
         try:
             if not hasattr(item, "prov") or not item.prov:
@@ -129,7 +128,6 @@ def _extract_elements(
 def extract_spatial_data_docling(
     input_path: Path, output_dir: Path, force_ocr: bool = False
 ) -> Dict[str, Any]:
-    """Extrahiert Text, Typen und exakte Top-Left Koordinaten via Docling."""
     logger.info("Starte räumliche Docling-Analyse (Spatial Data)...")
 
     converter = _setup_docling(force_ocr)
@@ -152,7 +150,6 @@ def extract_spatial_data_docling(
 
     _extract_elements(doc, page_heights, spatial_dom)
 
-    # 🚀 ENTERPRISE MEMORY CLEANUP
     del doc
     del result
     del converter
@@ -160,56 +157,16 @@ def extract_spatial_data_docling(
     return spatial_dom
 
 
-def extract_with_marker_fallback(input_path: Path, output_dir: Path) -> Dict[str, Any]:
-    """Fallback: Wenn Docling crasht, liefert Marker eine flache Struktur."""
-    import marker.models  # pylint: disable=import-outside-toplevel
-    from marker.converters.pdf import PdfConverter  # pylint: disable=import-outside-toplevel
-
-    logger.info("Starte Marker-Fallback (Flat Spatial DOM)...")
-    artifacts = {}
-    for name in ["load_all_models", "load_models", "create_model_dict"]:
-        if hasattr(marker.models, name):
-            artifacts = getattr(marker.models, name)()
-            break
-
-    converter = PdfConverter(artifact_dict=artifacts)
-    rendered = converter(str(input_path))
-
-    images_dict = {}
-    for img_name, pil_img in getattr(rendered, "images", {}).items():
-        img_path = output_dir / img_name
-        pil_img.convert("RGB").save(img_path, format="PNG")
-        images_dict[img_name] = str(img_path)
-
-    # 🚀 ENTERPRISE MEMORY CLEANUP
-    del artifacts
-    del converter
-
-    return {
-        "pages": [
-            {
-                "page_num": 1,
-                "width": 595.0,
-                "height": 842.0,
-                "elements": [
-                    {"type": "p", "text": rendered.markdown, "bbox": [0, 0, 595, 842]}
-                ],
-            }
-        ],
-        "images": images_dict,
-    }
-
-
 def main() -> None:
-    """Haupteinstiegspunkt."""
-    parser = argparse.ArgumentParser(description="Layout Worker (Spatial)")
+    parser = argparse.ArgumentParser(description="Layout Worker (Primary/Docling)")
     parser.add_argument("--input", required=True, help="Pfad zum Eingabe-PDF")
     parser.add_argument("--output", required=True, help="Pfad zur Ausgabe-JSON")
     parser.add_argument("--force-ocr", action="store_true", help="Erzwingt OCR")
     args, _ = parser.parse_known_args()
 
     input_pdf = Path(args.input)
-    out_dir = Path(args.output).parent
+    out_file = Path(args.output)
+    out_dir = out_file.parent
 
     if not input_pdf.exists():
         logger.error("Eingabedatei nicht gefunden: %s", input_pdf)
@@ -219,21 +176,16 @@ def main() -> None:
 
     try:
         data = extract_spatial_data_docling(input_pdf, out_dir, args.force_ocr)
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.warning("Docling fehlgeschlagen: %s", e)
-        try:
-            data = extract_with_marker_fallback(input_pdf, out_dir)
-        except Exception as ex:  # pylint: disable=broad-exception-caught
-            logger.error("❌ Layout-Extraktion fehlgeschlagen: %s", ex)
-            sys.exit(1)
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info("✅ Layout-Extraktion (Docling) erfolgreich.")
 
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("❌ Fataler Fehler in Docling: %s", e)
+        write_error_contract(out_file, type(e).__name__, str(e))
+        sys.exit(1)
     finally:
         cleanup_memory(aggressive=True)
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    logger.info("Layout-Extraktion erfolgreich abgeschlossen.")
 
 
 if __name__ == "__main__":

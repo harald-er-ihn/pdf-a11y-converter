@@ -1,1 +1,0 @@
-{"name": "layout_worker", "script": "run_layout.py", "timeout_sec": 600, "phase": "map", "accepts_force_ocr": true}

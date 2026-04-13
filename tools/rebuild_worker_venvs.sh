@@ -90,6 +90,11 @@ command -v "${DEFAULT_PYTHON}" >/dev/null 2>&1 || {
 for worker_path in "${WORKERS_DIR}"/*/; do
   worker_name="$(basename "${worker_path}")"
 
+  # 🚀 FIX: 'common' ist eine Shared Library, kein Worker! Überspringen.
+  if [[ "${worker_name}" == "common" || "${worker_name}" == "__pycache__" ]]; then
+    continue
+  fi
+
   log_info "Baue virtuelle Umgebung für: ${worker_name}"
 
   if [[ ! -f "${worker_path}/requirements.txt" ]]; then
@@ -117,7 +122,8 @@ for worker_path in "${WORKERS_DIR}"/*/; do
   # shellcheck disable=SC1091
   source venv/bin/activate
 
-  python -m pip install --upgrade pip
+  # 🚀 FIX: Upgrade pip, setuptools und wheel, um Compiler-Crashes (Maturin/Rust) auf Linux zu vermeiden
+  python -m pip install --upgrade pip setuptools wheel -q
 
   if [[ -f "constraints.txt" ]]; then
     pip install -r requirements.txt -c constraints.txt

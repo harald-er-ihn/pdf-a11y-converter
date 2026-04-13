@@ -4,16 +4,14 @@
 """
 Der Semantic Orchestrator.
 Leitet die PDF-Analyse, ruft isolierte Worker-Prozesse auf und sammelt.
-Implementiert das Blackboard-Pattern, Sensor-Fusion und den Audit Trail.
+Implementiert Parallel-Execution, Blackboard-Pattern und Sensor-Fusion.
 """
 
+import concurrent.futures
 import json
 import logging
-import os
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -24,9 +22,11 @@ from typing import Dict, Tuple, List, Any
 import pikepdf
 from PIL import Image
 
+from src.domain.spatial import SpatialDOM
+from src.infrastructure.runtime.worker_runner import WorkerRunner
 from src.pdf_diagnostics import PDFPreflightScanner
-from src.repair import repair_spatial_dom
 from src.plugins.workers import PluginManager, WorkerManifest
+from src.repair import repair_spatial_dom
 
 logger = logging.getLogger("pdf-converter")
 
@@ -101,64 +101,56 @@ class SemanticOrchestrator:
         self.temp_dir = Path(tempfile.gettempdir()) / "pdf-a11y-jobs"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-    def _run_worker(self, manifest: WorkerManifest, args: List[str]) -> bool:
-        script_path = manifest.worker_dir / manifest.script
-        worker_venv = manifest.worker_dir / "venv"
+    def _execute_map_task(
+        self,
+        worker: WorkerManifest,
+        input_path: Path,
+        job_dir: Path,
+        diagnostics: Any,
+        doc_lang: str,
+    ) -> Dict[str, Any]:
+        target_json = job_dir / f"{worker.name}_result.json"
+        worker_args = ["--input", str(input_path), "--output", str(target_json)]
 
-        py_exe = (
-            worker_venv / "Scripts" / "python.exe"
-            if sys.platform == "win32"
-            else worker_venv / "bin" / "python"
-        )
+        if worker.accepts_force_ocr and diagnostics.force_ocr_extraction:
+            worker_args.append("--force-ocr")
+        if worker.requires_lang:
+            worker_args.extend(["--lang", doc_lang])
 
-        if not py_exe.exists():
-            if getattr(sys, "frozen", False):
-                logger.error(
-                    "❌ FATAL: Worker Venv fehlt im kompilierten Build (%s)!", py_exe
-                )
-                return False
-            py_exe = Path(sys.executable)
+        logger.info("▶ Starte Spezialist: '%s'...", worker.name)
+        t_start = time.time()
+        success, stderr = WorkerRunner.execute(worker, worker_args)
+        duration = round(time.time() - t_start, 2)
 
-        cmd = [str(py_exe), str(script_path)]
-        cmd.extend(args)
+        data = None
+        err = None
 
-        env = os.environ.copy()
-        env.pop("PYTHONHOME", None)
-        env.pop("PYTHONPATH", None)
+        if target_json.exists():
+            try:
+                with open(target_json, "r", encoding="utf-8") as f:
+                    worker_data = json.load(f)
 
-        env["HF_HUB_OFFLINE"] = "1"
-        env["HF_HUB_DISABLE_TELEMETRY"] = "1"
-        env["DISABLE_TELEMETRY"] = "1"
+                if worker_data.get("status") == "error":
+                    err = worker_data.get("error", {})
+                elif success:
+                    data = worker_data
+            except json.JSONDecodeError:
+                pass
 
-        # 🚀 DER ULTIMATIVE UTF-8 FIX FÜR WINDOWS 11
-        env["PYTHONIOENCODING"] = "utf-8"
+        if not success and not err:
+            err = {
+                "type": "UnmanagedCrash",
+                "message": "Worker ist unerwartet abgestürzt.",
+                "details": stderr,
+            }
 
-        try:
-            # errors="replace" verhindert den harten UnicodeDecodeError endgültig
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                timeout=manifest.timeout_sec,
-            )
-            return True
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "❌ Timeout (%ss) in '%s'.", manifest.timeout_sec, manifest.name
-            )
-            return False
-        except subprocess.CalledProcessError as e:
-            logger.error("❌ Crash in '%s' (Code %s)", manifest.name, e.returncode)
-            if e.stderr:
-                logger.error("--- WORKER STDERR ---\n%s", e.stderr.strip())
-            return False
-        except Exception as e:
-            logger.error("❌ Systemfehler bei '%s': %s", manifest.name, e)
-            return False
+        return {
+            "name": worker.name,
+            "success": success and data is not None,
+            "duration": duration,
+            "data": data,
+            "error": err,
+        }
 
     def _assign_alt_texts_to_dom(
         self,
@@ -214,19 +206,28 @@ class SemanticOrchestrator:
                 args.extend(["--lang", doc_lang])
 
             t_start = time.time()
-            success = self._run_worker(manifest, args)
+            success, stderr = WorkerRunner.execute(manifest, args)
             audit_trail["workers"][manifest.name] = {
                 "status": "success" if success else "error",
                 "duration_sec": round(time.time() - t_start, 2),
             }
 
+            worker_data = {}
             if out_json.exists():
-                with open(out_json, "r", encoding="utf-8") as f:
-                    worker_data = json.load(f)
+                try:
+                    with open(out_json, "r", encoding="utf-8") as f:
+                        worker_data = json.load(f)
+                except json.JSONDecodeError:
+                    pass
 
                 if worker_data.get("status") == "error":
                     audit_err = worker_data["error"]
                     audit_trail["workers"][manifest.name]["error_details"] = audit_err
+                    logger.warning(
+                        "⚠️ Übersetzer meldet Problem [%s]: %s",
+                        audit_err.get("type", "Unknown"),
+                        audit_err.get("message", ""),
+                    )
                 elif success:
                     for img_name in list(images_dict.keys()):
                         if img_name in worker_data:
@@ -237,6 +238,14 @@ class SemanticOrchestrator:
                         if ref_key in worker_data:
                             el = spatial_dom["pages"][p_idx]["elements"][e_idx]
                             el["alt_text"] = worker_data[ref_key]
+
+            if not success and worker_data.get("status") != "error":
+                logger.error("❌ Crash in 'translation_worker':\n%s", stderr.strip())
+                audit_trail["workers"][manifest.name]["error_details"] = {
+                    "type": "UnmanagedCrash",
+                    "message": "Worker abgestürzt",
+                    "details": stderr,
+                }
 
         self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
@@ -346,18 +355,35 @@ class SemanticOrchestrator:
             args = ["--input", str(input_json), "--output", str(output_json)]
 
             t_start = time.time()
-            success = self._run_worker(manifest, args)
+            success, stderr = WorkerRunner.execute(manifest, args)
             audit_trail["workers"][manifest.name] = {
                 "status": "success" if success else "error",
                 "duration_sec": round(time.time() - t_start, 2),
             }
 
             if output_json.exists():
-                with open(output_json, "r", encoding="utf-8") as f:
-                    worker_data = json.load(f)
+                try:
+                    with open(output_json, "r", encoding="utf-8") as f:
+                        worker_data = json.load(f)
+                except json.JSONDecodeError:
+                    pass
+
                 if worker_data.get("status") == "error":
                     audit_err = worker_data["error"]
                     audit_trail["workers"][manifest.name]["error_details"] = audit_err
+                    logger.warning(
+                        "⚠️ Vision-KI meldet Problem [%s]: %s",
+                        audit_err.get("type", "Unknown"),
+                        audit_err.get("message", ""),
+                    )
+
+            if not success and worker_data.get("status") != "error":
+                logger.error("❌ Crash in 'vision_worker':\n%s", stderr.strip())
+                audit_trail["workers"][manifest.name]["error_details"] = {
+                    "type": "UnmanagedCrash",
+                    "message": "Worker abgestürzt",
+                    "details": stderr,
+                }
 
         alt_texts = (
             worker_data
@@ -407,46 +433,86 @@ class SemanticOrchestrator:
         }
 
         blackboard_results = {}
+        map_workers = self.plugin_manager.get_map_workers()
 
-        # 1. MAP PHASE
-        for worker in self.plugin_manager.get_map_workers():
-            target_json = job_dir / f"{worker.name}_result.json"
-            worker_args = ["--input", str(input_path), "--output", str(target_json)]
+        max_workers = len(map_workers) if map_workers else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for worker in map_workers:
+                futures.append(
+                    executor.submit(
+                        self._execute_map_task,
+                        worker,
+                        input_path,
+                        job_dir,
+                        diagnostics,
+                        doc_lang,
+                    )
+                )
 
-            if worker.accepts_force_ocr and diagnostics.force_ocr_extraction:
-                worker_args.append("--force-ocr")
-            if worker.requires_lang:
-                worker_args.extend(["--lang", doc_lang])
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                w_name = res["name"]
 
-            logger.info("▶ Starte Spezialist: '%s'...", worker.name)
-            t_start = time.time()
-            success = self._run_worker(worker, worker_args)
-            duration = round(time.time() - t_start, 2)
+                audit_trail["workers"][w_name] = {
+                    "status": "success" if res["success"] else "error",
+                    "duration_sec": res["duration"],
+                }
 
-            audit_trail["workers"][worker.name] = {
-                "status": "success" if success else "error",
-                "duration_sec": duration,
-            }
+                if res["error"]:
+                    audit_trail["workers"][w_name]["error_details"] = res["error"]
+                    if res["error"].get("type") == "UnmanagedCrash":
+                        logger.error(
+                            "❌ Crash in '%s':\n%s",
+                            w_name,
+                            res["error"].get("details", "").strip(),
+                        )
+                    else:
+                        logger.warning(
+                            "⚠️ Experte '%s' meldet Problem: %s",
+                            w_name,
+                            res["error"].get("message", ""),
+                        )
+                elif res["success"] and res["data"]:
+                    blackboard_results[w_name] = res["data"]
+                    logger.info("✅ '%s' fertig (%ss).", w_name, res["duration"])
 
-            if target_json.exists():
-                with open(target_json, "r", encoding="utf-8") as f:
-                    worker_data = json.load(f)
+        # 🚀 ARCHITEKTUR-UPGRADE: Orchestrator Fallback-Steuerung!
+        base_layout_name = None
+        if "layout_worker_docling" in blackboard_results:
+            base_layout_name = "layout_worker_docling"
+        else:
+            logger.warning("⚠️ Docling fehlgeschlagen. Starte Marker-Fallback...")
+            marker_manifest = self.plugin_manager.get_worker("layout_worker_marker")
+            if marker_manifest:
+                res = self._execute_map_task(
+                    marker_manifest, input_path, job_dir, diagnostics, doc_lang
+                )
+                audit_trail["workers"][res["name"]] = {
+                    "status": "success" if res["success"] else "error",
+                    "duration_sec": res["duration"],
+                }
+                if res["error"]:
+                    audit_trail["workers"][res["name"]]["error_details"] = res["error"]
+                    logger.error("❌ Marker Fallback ebenfalls fehlgeschlagen!")
+                elif res["success"] and res["data"]:
+                    blackboard_results[res["name"]] = res["data"]
+                    base_layout_name = "layout_worker_marker"
+                    logger.info("✅ '%s' fertig (%ss).", res["name"], res["duration"])
 
-                if worker_data.get("status") == "error":
-                    err = worker_data["error"]
-                    audit_trail["workers"][worker.name]["error_details"] = err
-                elif success:
-                    blackboard_results[worker.name] = worker_data
-                    logger.info("✅ '%s' fertig (%ss).", worker.name, duration)
-
-        # 2. REDUCE PHASE
-        if "layout_worker" not in blackboard_results:
-            logger.error("❌ Der Layout-Basis-Worker ist fehlgeschlagen!")
+        if not base_layout_name:
+            logger.error("❌ Der Layout-Basis-Worker ist komplett fehlgeschlagen!")
             return {}, {}, audit_trail
 
-        spatial_dom = blackboard_results["layout_worker"]
-        vis_recon = diagnostics.needs_visual_reconstruction
-        spatial_dom["needs_visual_reconstruction"] = vis_recon
+        raw_spatial_dom = blackboard_results[base_layout_name]
+
+        try:
+            spatial_dom = SpatialDOM.model_validate(raw_spatial_dom).model_dump()
+            vis_recon = diagnostics.needs_visual_reconstruction
+            spatial_dom["needs_visual_reconstruction"] = vis_recon
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("❌ Spatial DOM Validierung fehlgeschlagen: %s", e)
+            return {}, {}, audit_trail
 
         if "signature_worker" in blackboard_results:
             sig = blackboard_results["signature_worker"].get("pages", [])

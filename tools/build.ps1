@@ -4,7 +4,7 @@ Enterprise Build-Script für den PDF A11y Converter.
 Nutzt absolute Interpreter-Pfade und sicheres Error-Handling.
 #>
 
-$ErrorActionPreference = "Continue" # Verhindert Abstürze durch harmlose stderr-Logs
+$ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 $LogDir = Join-Path $ProjectRoot "logs"
@@ -27,22 +27,19 @@ function Write-Log {
 function Run-Python {
     param([string]$ScriptPath, [string]$Args="")
     
-    # Nutzt IMMER strikt den Venv-Interpreter. Kein Activate.ps1 nötig!
     $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
     
     if (!(Test-Path $VenvPython)) {
-        Write-Log "⚠️ Venv nicht gefunden. Nutze System-Python als Fallback..." "Yellow"
+        Write-Log "⚠️ Venv nicht gefunden. Nutze System-Python..." "Yellow"
         $VenvPython = "python"
     }
 
     Write-Log "> $VenvPython $ScriptPath $Args" "DarkGray"
     
-    # Führt den Prozess aus und leitet Streams live in die Konsole
     $process = Start-Process -FilePath $VenvPython -ArgumentList "$ScriptPath $Args" -NoNewWindow -Wait -PassThru
     
     if ($process.ExitCode -ne 0) {
         Write-Log "❌ FEHLER: Skript endete mit Code $($process.ExitCode)" "Red"
-        Write-Log "Bitte prüfen Sie das Konsolenfenster auf Details." "Red"
         exit $process.ExitCode
     }
 }
@@ -57,13 +54,13 @@ try {
         python -m venv venv
     }
 
-    Write-Log "`n[2/5] Installiere Core-Dependencies..." "Green"
-    $VenvPip = Join-Path $ProjectRoot "venv\Scripts\pip.exe"
-    Start-Process -FilePath $VenvPip -ArgumentList "install -r requirements-dev.txt" -NoNewWindow -Wait
-
-	Write-Log "`n[2b/5] upgrade pip..." "Green"
-    Run-Python "C:\Users\HaraldHutter\project_code\venv\Scripts\python.exe -m pip install --upgrade pip"
+    Write-Log "`n[2/5] Installiere Core-Dependencies & Upgrade Pip..." "Green"
+    $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
     
+    # Pip und Setuptools aktualisieren, um Rust-Crashes zu vermeiden
+    Start-Process -FilePath $VenvPython -ArgumentList "-m pip install --upgrade pip setuptools wheel" -NoNewWindow -Wait
+    Start-Process -FilePath $VenvPython -ArgumentList "-m pip install -r requirements-dev.txt" -NoNewWindow -Wait
+
     Write-Log "`n[3/5] Phase 1: Core Binaries kompilieren (build.py)..." "Green"
     Run-Python "build.py"
 

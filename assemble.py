@@ -22,10 +22,9 @@ def assemble_target(target_name: str) -> None:
     print(f"\n📦 Assembly Phase für '{target_name}'...")
     target_dir = DIST_DIR / target_name
 
-    # PyInstaller >= 6.0 mit --onedir nutzt "_internal" für Ressourcen
     internal_dir = target_dir / "_internal"
 
-    # 1. Ressourcen kopieren (veraPDF, YOLO, GTK)
+    # 1. Ressourcen kopieren
     src_resources = ROOT_DIR / "resources"
     dst_resources = internal_dir / "resources"
 
@@ -36,13 +35,11 @@ def assemble_target(target_name: str) -> None:
         print("  ⚠️ WARNUNG: Quell-Ordner 'resources' nicht gefunden!")
 
     # 2. Worker kopieren und Venvs einrichten
-    # Die Engine sucht die Worker via Path(sys.executable).parent / "workers"
     src_workers = ROOT_DIR / "workers"
     dst_workers = target_dir / "workers"
 
     if src_workers.exists():
         print("  -> Kopiere Worker-Strukturen...")
-        # Venvs und Caches vom Host-System strikt ignorieren!
         shutil.copytree(
             src_workers,
             dst_workers,
@@ -56,34 +53,51 @@ def assemble_target(target_name: str) -> None:
                 print(f"     * Setup [{worker_dir.name}]...")
                 venv_dir = worker_dir / "venv"
 
-                # Venv erzeugen
+                # 100% Offline: Standard Venv-Generierung
                 subprocess.run(
                     [sys.executable, "-m", "venv", str(venv_dir)], check=True
                 )
 
-                # Plattform-spezifische Pfade
                 if sys.platform == "win32":
                     py_exe = venv_dir / "Scripts" / "python.exe"
-                    pip_exe = venv_dir / "Scripts" / "pip.exe"
                 else:
                     py_exe = venv_dir / "bin" / "python"
-                    pip_exe = venv_dir / "bin" / "pip"
 
-                # Pip aktualisieren & Requirements installieren
-                subprocess.run(
-                    [str(py_exe), "-m", "pip", "install", "--upgrade", "pip", "-q"],
-                    check=False,
-                )
+                # Sicherheits-Upgrade: Verhindert Rust/Maturin Kompilierungsfehler
                 subprocess.run(
                     [
-                        str(pip_exe),
+                        str(py_exe),
+                        "-m",
+                        "pip",
                         "install",
-                        "-r",
-                        str(worker_dir / "requirements.txt"),
+                        "--upgrade",
+                        "pip",
+                        "setuptools",
+                        "wheel",
+                        "-q",
                     ],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
+                    check=False,
                 )
+
+                try:
+                    subprocess.run(
+                        [
+                            str(py_exe),
+                            "-m",
+                            "pip",
+                            "install",
+                            "-r",
+                            str(worker_dir / "requirements.txt"),
+                        ],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
+                except subprocess.CalledProcessError:
+                    print(f"\n❌ FEHLER beim Installieren von {worker_dir.name}!")
+                    print(
+                        "Achten Sie darauf, dass Sie für KI-Pakete Python 3.12 nutzen."
+                    )
+                    sys.exit(1)
     else:
         print("  ⚠️ WARNUNG: Quell-Ordner 'workers' nicht gefunden!")
 

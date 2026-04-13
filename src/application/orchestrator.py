@@ -125,17 +125,23 @@ class SemanticOrchestrator:
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
+
         env["HF_HUB_OFFLINE"] = "1"
         env["HF_HUB_DISABLE_TELEMETRY"] = "1"
         env["DISABLE_TELEMETRY"] = "1"
 
+        # 🚀 DER ULTIMATIVE UTF-8 FIX FÜR WINDOWS 11
+        env["PYTHONIOENCODING"] = "utf-8"
+
         try:
+            # errors="replace" verhindert den harten UnicodeDecodeError endgültig
             subprocess.run(
                 cmd,
                 check=True,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                errors="replace",
                 env=env,
                 timeout=manifest.timeout_sec,
             )
@@ -147,6 +153,8 @@ class SemanticOrchestrator:
             return False
         except subprocess.CalledProcessError as e:
             logger.error("❌ Crash in '%s' (Code %s)", manifest.name, e.returncode)
+            if e.stderr:
+                logger.error("--- WORKER STDERR ---\n%s", e.stderr.strip())
             return False
         except Exception as e:
             logger.error("❌ Systemfehler bei '%s': %s", manifest.name, e)
@@ -431,7 +439,7 @@ class SemanticOrchestrator:
                     blackboard_results[worker.name] = worker_data
                     logger.info("✅ '%s' fertig (%ss).", worker.name, duration)
 
-        # 2. REDUCE PHASE (Sensor Fusion)
+        # 2. REDUCE PHASE
         if "layout_worker" not in blackboard_results:
             logger.error("❌ Der Layout-Basis-Worker ist fehlgeschlagen!")
             return {}, {}, audit_trail
@@ -471,7 +479,7 @@ class SemanticOrchestrator:
 def extract_to_spatial(
     input_path: str,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, str], Dict[str, Any]]:
-    """Haupt-Einstiegspunkt für die GUI/CLI. Gibt nun auch das Audit-Log zurück."""
+    """Haupt-Einstiegspunkt für die GUI/CLI."""
     pdf_path = Path(input_path)
     logger.info("✨ Starte Orchestrierung für %s...", pdf_path.name)
 

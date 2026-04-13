@@ -38,7 +38,13 @@ def generate_architecture_graph() -> None:
 
     # Application Layer Cluster
     with dot.subgraph(name="cluster_app") as app:
-        app.attr(style="dashed", color="#83B818", label="Application Layer", fontcolor="#83B818", fontname="Arial bold")
+        app.attr(
+            style="dashed",
+            color="#83B818",
+            label="Application Layer",
+            fontcolor="#83B818",
+            fontname="Arial bold",
+        )
         app.node(
             "Orchestrator",
             "SemanticOrchestrator\n[Sensor Fusion & Audit]",
@@ -49,15 +55,26 @@ def generate_architecture_graph() -> None:
 
     # Plugins Layer Cluster
     with dot.subgraph(name="cluster_plugins") as plugins:
-        plugins.attr(style="dashed", color="#e2a929", label="Plugins Layer (Isolated Venvs)", fontcolor="#e2a929", fontname="Arial bold")
-        plugins.node("PluginManager", "Plugin Manager\n[Manifest Discovery]", fillcolor="#d4af37", fontcolor="white")
-        
+        plugins.attr(
+            style="dashed",
+            color="#e2a929",
+            label="Plugins Layer (Isolated Venvs)",
+            fontcolor="#e2a929",
+            fontname="Arial bold",
+        )
+        plugins.node(
+            "PluginManager",
+            "Plugin Manager\n[Manifest Discovery]",
+            fillcolor="#d4af37",
+            fontcolor="white",
+        )
+
         plugins.node("W_Layout", "Layout-Experte\n[docling]", fillcolor="#e2a929")
         plugins.node("W_Table", "Tabellen-Experte\n[pdfplumber]", fillcolor="#e2a929")
         plugins.node("W_Sig", "Signatur-Experte\n[yolov8s local]", fillcolor="#e2a929")
         plugins.node("W_Vision", "Bild-Experte\n[blip]", fillcolor="#e2a929")
         plugins.node("W_Trans", "Übersetzer\n[nllb-200]", fillcolor="#e2a929")
-        
+
         # Internal Plugin flow
         plugins.edge("PluginManager", "W_Layout", style="dotted")
         plugins.edge("PluginManager", "W_Table", style="dotted")
@@ -67,25 +84,60 @@ def generate_architecture_graph() -> None:
 
     # Infrastructure Layer Cluster
     with dot.subgraph(name="cluster_infra") as infra:
-        infra.attr(style="dashed", color="#6a0dad", label="Infrastructure Layer", fontcolor="#6a0dad", fontname="Arial bold")
+        infra.attr(
+            style="dashed",
+            color="#6a0dad",
+            label="Infrastructure Layer",
+            fontcolor="#6a0dad",
+            fontname="Arial bold",
+        )
         infra.node("Repair", "Repair Facade\n[PyMuPDF Fonts]", fillcolor="#d4e1f9")
-        infra.node("Generator", "PDF Generator\n[WeasyPrint Overlay]", fillcolor="#a0522d", fontcolor="white")
-        infra.node("Validator", "Validation\n[VeraPDF offline]", fillcolor="#6a0dad", fontcolor="white")
-        infra.node("VSR", "VSR Engine\n[StructTreeRoot Parser]", fillcolor="#4A6B74", fontcolor="white", shape="hexagon")
+        infra.node(
+            "Generator",
+            "PDF Generator\n[WeasyPrint Overlay]",
+            fillcolor="#a0522d",
+            fontcolor="white",
+        )
+        infra.node(
+            "Validator",
+            "Validation\n[VeraPDF offline]",
+            fillcolor="#6a0dad",
+            fontcolor="white",
+        )
+        infra.node(
+            "VSR",
+            "VSR Engine\n[StructTreeRoot Parser]",
+            fillcolor="#4A6B74",
+            fontcolor="white",
+            shape="hexagon",
+        )
 
     # Outputs
-    dot.node("OutputPDF", "Barrierefreies\nPDF/UA-1", fillcolor="#2b5e8f", fontcolor="white")
-    dot.node("AuditLog", "Audit Trail\n[JSON Log]", fillcolor="#555555", fontcolor="white", shape="note")
-    dot.node("VSROut", "Visual Screenreader\n[HTML Vorschau]", fillcolor="#2b5e8f", fontcolor="white")
+    dot.node(
+        "OutputPDF", "Barrierefreies\nPDF/UA-1", fillcolor="#2b5e8f", fontcolor="white"
+    )
+    dot.node(
+        "AuditLog",
+        "Audit Trail\n[JSON Log]",
+        fillcolor="#555555",
+        fontcolor="white",
+        shape="note",
+    )
+    dot.node(
+        "VSROut",
+        "Visual Screenreader\n[HTML Vorschau]",
+        fillcolor="#2b5e8f",
+        fontcolor="white",
+    )
 
     # ----- CONNECTIONS -----
-    
+
     # Trigger
     dot.edge("User", "Orchestrator")
-    
+
     # Discovery & Execution
     dot.edge("Orchestrator", "PluginManager", label=" Load Manifests", fontsize="9")
-    
+
     # Data flow back to Orchestrator (Blackboard)
     dot.edge("W_Layout", "Orchestrator")
     dot.edge("W_Table", "Orchestrator")
@@ -97,11 +149,13 @@ def generate_architecture_graph() -> None:
     dot.edge("Orchestrator", "Repair", label=" Spatial DOM", fontsize="9")
     dot.edge("Repair", "Generator", label=" Sanitized DOM", fontsize="9")
     dot.edge("Generator", "Validator", label=" Raw PDF", fontsize="9")
-    
+
     # Final Outputs
     dot.edge("Validator", "OutputPDF", label=" Verified PDF", fontsize="9")
-    dot.edge("Orchestrator", "AuditLog", label=" JSON Status", fontsize="9", style="dashed")
-    
+    dot.edge(
+        "Orchestrator", "AuditLog", label=" JSON Status", fontsize="9", style="dashed"
+    )
+
     # VSR Flow
     dot.edge("User", "VSR", label=" Trigger", fontsize="9", style="dashed")
     dot.edge("OutputPDF", "VSR", label=" Read Tags", fontsize="9")

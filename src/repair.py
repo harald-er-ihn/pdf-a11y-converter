@@ -1,6 +1,6 @@
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
-# Licensed under the GNU General Public License v3 or later
+# Lizenziert unter der GNU General Public License v3 oder später
 """
 Sanitization & Validation Facade (Hybrid Mode).
 Kombiniert KI-Labels mit dem Typografie-Experten (PyMuPDF),
@@ -11,7 +11,9 @@ import logging
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from src.domain.spatial import SpatialDOM, SpatialElement
 
 logger = logging.getLogger("pdf-converter")
 
@@ -56,10 +58,13 @@ def _extract_typography_data(pdf_path: Path) -> Dict[int, List[Dict]]:
     return page_fonts
 
 
-def _flush_list(list_items: List[Dict], new_elements: List[Dict]) -> None:
+def _flush_list(
+    list_items: List[SpatialElement], new_elements: List[SpatialElement]
+) -> None:
     """Packt angesammelte Listen-Items in ein Listen-Tag."""
     if list_items:
-        new_elements.append({"type": "list", "items": list_items.copy()})
+        dict_items = [item.model_dump() for item in list_items]
+        new_elements.append(SpatialElement(type="list", items=dict_items))
         list_items.clear()
 
 
@@ -78,15 +83,13 @@ def _get_best_span(bbox: List[float], page_fonts: List[Dict]) -> Optional[Dict]:
     return max(intersecting, key=lambda s: s["size"]) if intersecting else None
 
 
-def _calculate_median_size(spatial_dom: Dict[str, Any], page_fonts: Dict) -> float:
+def _calculate_median_size(spatial_dom: SpatialDOM, page_fonts: Dict) -> float:
     """Berechnet die Median-Schriftgröße des Dokuments."""
     all_sizes = [span["size"] for spans in page_fonts.values() for span in spans]
     if not all_sizes:
-        for page in spatial_dom.get("pages", []):
-            for el in page.get("elements", []):
-                h = abs(
-                    el.get("bbox", [0, 0, 0, 0])[3] - el.get("bbox", [0, 0, 0, 0])[1]
-                )
+        for page in spatial_dom.pages:
+            for el in page.elements:
+                h = abs(el.bbox[3] - el.bbox[1])
                 if h > 2.0:
                     all_sizes.append(h)
     if all_sizes:
@@ -108,13 +111,13 @@ def _smooth_heading(raw_h: int, state: HeadingState) -> int:
 
 
 def _process_heading(
-    el: Dict[str, Any],
+    el: SpatialElement,
     true_size: float,
     med: float,
     state: HeadingState,
     el_type: str,
     docling_head: bool,
-) -> Dict[str, Any]:
+) -> SpatialElement:
     """Wandelt ein Element in eine validierte Überschrift um."""
     if true_size > med * 1.8:
         raw_h = 1
@@ -125,15 +128,15 @@ def _process_heading(
     else:
         raw_h = int(el_type[1]) if docling_head else 3
 
-    el["type"] = f"h{_smooth_heading(raw_h, state)}"
+    el.type = f"h{_smooth_heading(raw_h, state)}"
     return el
 
 
 def _get_element_metrics(
-    el: Dict[str, Any], page_fonts: List[Dict]
+    el: SpatialElement, page_fonts: List[Dict]
 ) -> Tuple[float, bool]:
     """Ermittelt die exakte physische Schriftgröße und Formatierung."""
-    bbox = el.get("bbox", [0, 0, 0, 0])
+    bbox = el.bbox
     true_size = abs(bbox[3] - bbox[1])
     is_bold = False
 
@@ -146,7 +149,11 @@ def _get_element_metrics(
 
 
 def _is_heading_candidate(
-    text: str, el_type: str, true_size: float, is_bold: bool, med: float
+    text: str,
+    el_type: str,
+    true_size: float,
+    is_bold: bool,
+    med: float,
 ) -> Tuple[bool, bool]:
     """Prüft, ob das Element semantisch und physisch eine Überschrift ist."""
     is_form = text.startswith("$$") or text.startswith("\\")
@@ -173,21 +180,25 @@ def _is_list_item_candidate(
 
 
 def _process_page_elements(
-    elements: List[Dict], page_fonts: List[Dict], med: float, state: HeadingState
-) -> List[Dict]:
+    elements: List[SpatialElement],
+    page_fonts: List[Dict],
+    med: float,
+    state: HeadingState,
+) -> List[SpatialElement]:
     """Isolierte Verarbeitungsschleife für die Elemente einer Seite."""
-    new_els: List[Dict] = []
-    list_items: List[Dict] = []
+    new_els: List[SpatialElement] = []
+    list_items: List[SpatialElement] = []
     valid_types = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li"}
 
     for el in elements:
-        el_t = el.get("type", "p")
+        el_t = el.type
         if el_t not in valid_types:
             _flush_list(list_items, new_els)
             new_els.append(el)
             continue
 
-        text = el.get("text", "").strip()
+        text = el.text or ""
+        text = text.strip()
         if not text:
             continue
 
@@ -202,12 +213,12 @@ def _process_page_elements(
             continue
 
         if _is_list_item_candidate(text, el_t, true_size, med):
-            el["type"] = "li"
+            el.type = "li"
             list_items.append(el)
             continue
 
         _flush_list(list_items, new_els)
-        el["type"] = "p"
+        el.type = "p"
         new_els.append(el)
 
     _flush_list(list_items, new_els)
@@ -215,9 +226,9 @@ def _process_page_elements(
 
 
 def repair_spatial_dom(
-    spatial_dom: Dict[str, Any], pdf_path: Optional[Path] = None
-) -> Dict[str, Any]:
-    """Facade Pattern: Initiiert die DOM-Reparatur."""
+    spatial_dom: SpatialDOM, pdf_path: Optional[Path] = None
+) -> SpatialDOM:
+    """Facade Pattern: Initiiert die typisierte DOM-Reparatur."""
     logger.info("🤖 Typografie-Experte (PyMuPDF) prüft Font-Metriken...")
 
     p_fonts = (
@@ -226,10 +237,10 @@ def repair_spatial_dom(
     med_size = _calculate_median_size(spatial_dom, p_fonts)
     state = HeadingState()
 
-    for page in spatial_dom.get("pages", []):
-        p_num = page.get("page_num")
-        page["elements"] = _process_page_elements(
-            page.get("elements", []), p_fonts.get(p_num, []), med_size, state
+    for page in spatial_dom.pages:
+        p_num = page.page_num
+        page.elements = _process_page_elements(
+            page.elements, p_fonts.get(p_num, []), med_size, state
         )
 
     return spatial_dom

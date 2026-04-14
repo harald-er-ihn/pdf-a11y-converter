@@ -17,12 +17,12 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple, List, Any
+from typing import Any, Dict, List, Tuple
 
 import pikepdf
 from PIL import Image
 
-from src.domain.spatial import SpatialDOM
+from src.application.adapters import LayoutAdapter
 from src.infrastructure.runtime.worker_runner import WorkerRunner
 from src.pdf_diagnostics import PDFPreflightScanner
 from src.plugins.workers import PluginManager, WorkerManifest
@@ -477,7 +477,6 @@ class SemanticOrchestrator:
                     blackboard_results[w_name] = res["data"]
                     logger.info("✅ '%s' fertig (%ss).", w_name, res["duration"])
 
-        # 🚀 ARCHITEKTUR-UPGRADE: Orchestrator Fallback-Steuerung!
         base_layout_name = None
         if "layout_worker_docling" in blackboard_results:
             base_layout_name = "layout_worker_docling"
@@ -507,7 +506,12 @@ class SemanticOrchestrator:
         raw_spatial_dom = blackboard_results[base_layout_name]
 
         try:
-            spatial_dom = SpatialDOM.model_validate(raw_spatial_dom).model_dump()
+            if base_layout_name == "layout_worker_docling":
+                dom_obj = LayoutAdapter.normalize_docling(raw_spatial_dom)
+            else:
+                dom_obj = LayoutAdapter.normalize_marker(raw_spatial_dom)
+
+            spatial_dom = dom_obj.model_dump()
             vis_recon = diagnostics.needs_visual_reconstruction
             spatial_dom["needs_visual_reconstruction"] = vis_recon
         except Exception as e:  # pylint: disable=broad-exception-caught

@@ -3,8 +3,8 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Domain Models für das Spatial DOM.
-Dient als Anti-Corruption Layer zwischen KI-Ausgaben und der PDF-Generierung.
-Garantiert, dass der Datenvertrag strikt eingehalten wird.
+Dient als Anti-Corruption Layer zwischen KI-Ausgaben.
+Inklusive strikter Versionierung für Vorwärtskompatibilität.
 """
 
 from typing import Any, Dict, List, Optional
@@ -13,14 +13,14 @@ from pydantic import BaseModel, Field
 
 
 class SpatialElement(BaseModel):
-    """Repräsentiert ein einzelnes visuelles/semantisches Element auf dem PDF."""
+    """Repräsentiert ein einzelnes visuelles/semantisches Element."""
 
     type: str
     bbox: List[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
     text: Optional[str] = None
     alt_text: Optional[str] = None
     html: Optional[str] = None
-    items: Optional[List[Dict[str, Any]]] = None  # Für rekursive Listen-Items
+    items: Optional[List[Dict[str, Any]]] = None
 
 
 class SpatialPage(BaseModel):
@@ -33,8 +33,9 @@ class SpatialPage(BaseModel):
 
 
 class SpatialDOM(BaseModel):
-    """Der Haupt-Vertrag für das Semantic Overlay Blackboard."""
+    """Der versionierte Haupt-Vertrag für das Semantic Overlay."""
 
+    version: int = 1
     pages: List[SpatialPage] = Field(default_factory=list)
     images: Dict[str, str] = Field(default_factory=dict)
     needs_visual_reconstruction: bool = False

@@ -5,19 +5,19 @@
 Der Semantic Orchestrator.
 Leitet die PDF-Analyse, ruft isolierte Worker-Prozesse auf und sammelt.
 Implementiert Parallel-Execution, Blackboard-Pattern und Sensor-Fusion.
+Arbeitet jetzt zu 100% typsicher und delegiert Mutationen an den DOMTransformer.
 """
 
 import concurrent.futures
 import json
 import logging
-import re
 import shutil
 import tempfile
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import pikepdf
 from PIL import Image
@@ -31,7 +31,8 @@ from src.application.adapters import (
     TableAdapter,
     VisionAdapter,
 )
-from src.domain.spatial import SpatialDOM, SpatialElement
+from src.application.dom_transformer import DOMTransformer
+from src.domain.spatial import SpatialDOM
 from src.infrastructure.runtime.worker_runner import WorkerRunner
 from src.pdf_diagnostics import PDFPreflightScanner
 from src.plugins.workers import PluginManager, WorkerManifest
@@ -41,6 +42,7 @@ logger = logging.getLogger("pdf-converter")
 
 
 def _get_pdf_lang(input_path: Path) -> str:
+    """Extrahiert die PDF-Sprache aus Metadaten oder per Heuristik."""
     try:
         with pikepdf.open(str(input_path)) as pdf:
             if "/Lang" in pdf.Root:
@@ -56,27 +58,11 @@ def _get_pdf_lang(input_path: Path) -> str:
     except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug("XMP-Sprache nicht lesbar: %s", e)
 
-    try:
-        import fitz  # pylint: disable=import-outside-toplevel
-        from langdetect import detect  # pylint: disable=import-outside-toplevel
-
-        doc = fitz.open(input_path)
-        text = " ".join([p.get_text() for p in doc[:3]])
-        doc.close()
-
-        if len(text.strip()) > 20:
-            det = detect(text)
-            bcp = {"en": "en-US", "de": "de-DE", "es": "es-ES", "fr": "fr-FR"}
-            return bcp.get(det, det)
-    except ImportError:
-        logger.warning("Tipp: 'pip install langdetect' für Auto-Language!")
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.debug("Spracherkennung fehlgeschlagen: %s", e)
-
     return "de-DE"
 
 
 def _extract_original_metadata(input_path: Path) -> dict[str, str]:
+    """Sichert Metadaten für das Overlay-Dokument."""
     meta: dict[str, str] = {}
     try:
         with pikepdf.open(str(input_path)) as pdf:
@@ -98,12 +84,8 @@ def _extract_original_metadata(input_path: Path) -> dict[str, str]:
     return meta
 
 
-def _is_inside(center_x: float, center_y: float, box: List[float]) -> bool:
-    return box[0] <= center_x <= box[2] and box[1] <= center_y <= box[3]
-
-
 class SemanticOrchestrator:
-    """Orchestriert die isolierten Experten-Worker."""
+    """Orchestriert die isolierten Experten-Worker typsicher."""
 
     def __init__(self) -> None:
         self.plugin_manager = PluginManager()
@@ -118,6 +100,7 @@ class SemanticOrchestrator:
         diagnostics: Any,
         doc_lang: str,
     ) -> Dict[str, Any]:
+        """Führt einen Plugin-Worker isoliert aus."""
         target_json = job_dir / f"{worker.name}_result.json"
         worker_args = ["--input", str(input_path), "--output", str(target_json)]
 
@@ -165,7 +148,8 @@ class SemanticOrchestrator:
         self,
         spatial_dom: SpatialDOM,
         images_dict: Dict[str, Tuple[Image.Image, str]],
-    ) -> None:
+    ) -> SpatialDOM:
+        """Injeziert Alt-Texte typsicher in das SpatialDOM."""
         vision_alts = [alt for _, alt in images_dict.values()]
         v_idx = 0
         for page in spatial_dom.pages:
@@ -176,6 +160,7 @@ class SemanticOrchestrator:
                         v_idx += 1
                     else:
                         el.alt_text = "Abbildung"
+        return SpatialDOM.model_validate(spatial_dom.model_dump())
 
     def _translate_content(
         self,
@@ -184,7 +169,8 @@ class SemanticOrchestrator:
         doc_lang: str,
         job_dir: Path,
         audit_trail: Dict[str, Any],
-    ) -> None:
+    ) -> SpatialDOM:
+        """Übersetzt Vision-Texte via NLLB-200 Plugin."""
         texts_to_translate = {}
         for img_name, (_, alt_text) in images_dict.items():
             texts_to_translate[img_name] = alt_text
@@ -198,8 +184,7 @@ class SemanticOrchestrator:
                     dom_alt_refs.append((p_idx, e_idx, ref_key))
 
         if not texts_to_translate:
-            self._assign_alt_texts_to_dom(spatial_dom, images_dict)
-            return
+            return self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
         in_json = job_dir / "trans_in.json"
         out_json = job_dir / "trans_out.json"
@@ -232,11 +217,6 @@ class SemanticOrchestrator:
                 if worker_data.get("status") == "error":
                     audit_err = worker_data["error"]
                     audit_trail["workers"][manifest.name]["error_details"] = audit_err
-                    logger.warning(
-                        "⚠️ Übersetzer Problem [%s]: %s",
-                        audit_err.get("type", "Unknown"),
-                        audit_err.get("message", ""),
-                    )
                 elif success:
                     for img_name in list(images_dict.keys()):
                         if img_name in worker_data:
@@ -256,88 +236,12 @@ class SemanticOrchestrator:
                     "details": stderr,
                 }
 
-        self._assign_alt_texts_to_dom(spatial_dom, images_dict)
-
-    def _merge_signatures(
-        self,
-        spatial_dom: SpatialDOM,
-        signatures: Dict[int, List[SpatialElement]],
-    ) -> None:
-        for p_num, sig_elements in signatures.items():
-            for dom_page in spatial_dom.pages:
-                if dom_page.page_num == p_num:
-                    dom_page.elements.extend(sig_elements)
-                    break
-
-    def _merge_tables(
-        self,
-        spatial_dom: SpatialDOM,
-        table_pages: Dict[int, List[SpatialElement]],
-    ) -> None:
-        for p_num, t_elements in table_pages.items():
-            for dom_page in spatial_dom.pages:
-                if dom_page.page_num == p_num:
-                    filtered: List[SpatialElement] = []
-                    for base_el in dom_page.elements:
-                        b_box = base_el.bbox
-                        cx = (b_box[0] + b_box[2]) / 2.0
-                        cy = (b_box[1] + b_box[3]) / 2.0
-                        if not any(_is_inside(cx, cy, t.bbox) for t in t_elements):
-                            filtered.append(base_el)
-                    dom_page.elements = filtered + t_elements
-                    break
-
-    def _merge_forms(
-        self, spatial_dom: SpatialDOM, forms: List[SpatialElement]
-    ) -> None:
-        if forms and spatial_dom.pages:
-            spatial_dom.pages[0].elements.extend(forms)
-
-    def _merge_footnotes(
-        self,
-        spatial_dom: SpatialDOM,
-        footnote_pages: Dict[int, List[SpatialElement]],
-    ) -> None:
-        for p_num, f_elements in footnote_pages.items():
-            for dom_page in spatial_dom.pages:
-                if dom_page.page_num == p_num:
-                    for base_el in dom_page.elements:
-                        b_box = base_el.bbox
-                        cx = (b_box[0] + b_box[2]) / 2.0
-                        cy = (b_box[1] + b_box[3]) / 2.0
-                        if any(_is_inside(cx, cy, f.bbox) for f in f_elements):
-                            base_el.type = "Note"
-                    break
-
-    def _merge_formulas(self, spatial_dom: SpatialDOM, formula_md: str) -> None:
-        if not formula_md:
-            return
-
-        regex = r"(\$\$|\\\[|\\\()(.*?)(\$\$|\\\]|\\\))"
-        latex_formulas = [
-            m.group(2).strip() for m in re.finditer(regex, formula_md, flags=re.DOTALL)
-        ]
-
-        if not latex_formulas:
-            return
-
-        formula_idx = 0
-        for page in spatial_dom.pages:
-            for el in page.elements:
-                text = el.text or ""
-                is_garbage = len(text) < 25 and (
-                    "̂" in text or "ݏ" in text or "\\" in text
-                )
-
-                if el.type == "formula" or is_garbage:
-                    if formula_idx < len(latex_formulas):
-                        el.text = f"$$ {latex_formulas[formula_idx]} $$"
-                        el.type = "p"
-                        formula_idx += 1
+        return self._assign_alt_texts_to_dom(spatial_dom, images_dict)
 
     def _process_images(
         self, spatial_dom: SpatialDOM, job_dir: Path, audit_trail: Dict[str, Any]
     ) -> Dict[str, Tuple[Image.Image, str]]:
+        """Ruft die Vision-KI via Plugin-Schnittstelle auf."""
         images_dict = {}
         image_paths = spatial_dom.images
         if not image_paths:
@@ -373,11 +277,6 @@ class SemanticOrchestrator:
                 if worker_data.get("status") == "error":
                     audit_err = worker_data["error"]
                     audit_trail["workers"][manifest.name]["error_details"] = audit_err
-                    logger.warning(
-                        "⚠️ Vision-KI meldet Problem[%s]: %s",
-                        audit_err.get("type", "Unknown"),
-                        audit_err.get("message", ""),
-                    )
 
             if not success and worker_data.get("status") != "error":
                 logger.error("❌ Crash in 'vision_worker':\n%s", stderr.strip())
@@ -463,18 +362,6 @@ class SemanticOrchestrator:
 
                 if res["error"]:
                     audit_trail["workers"][w_name]["error_details"] = res["error"]
-                    if res["error"].get("type") == "UnmanagedCrash":
-                        logger.error(
-                            "❌ Crash in '%s':\n%s",
-                            w_name,
-                            res["error"].get("details", "").strip(),
-                        )
-                    else:
-                        logger.warning(
-                            "⚠️ Experte '%s' meldet Problem: %s",
-                            w_name,
-                            res["error"].get("message", ""),
-                        )
                 elif res["success"] and res["data"]:
                     blackboard_results[w_name] = res["data"]
                     logger.info("✅ '%s' fertig (%ss).", w_name, res["duration"])
@@ -495,7 +382,6 @@ class SemanticOrchestrator:
                 }
                 if res["error"]:
                     audit_trail["workers"][res["name"]]["error_details"] = res["error"]
-                    logger.error("❌ Marker Fallback ebenfalls fehlgeschlagen!")
                 elif res["success"] and res["data"]:
                     blackboard_results[res["name"]] = res["data"]
                     base_layout_name = "layout_worker_marker"
@@ -519,28 +405,29 @@ class SemanticOrchestrator:
             logger.error("❌ Spatial DOM Validierung fehlgeschlagen: %s", e)
             return SpatialDOM(), {}, audit_trail
 
+        # Sensor Fusion Layer (Typsicher über DOMTransformer)
         if "signature_worker" in blackboard_results:
             sig = SignatureAdapter.parse(blackboard_results["signature_worker"])
-            self._merge_signatures(spatial_dom, sig)
+            spatial_dom = DOMTransformer.merge_signatures(spatial_dom, sig)
 
         if "table_worker" in blackboard_results:
             tbl = TableAdapter.parse(blackboard_results["table_worker"])
-            self._merge_tables(spatial_dom, tbl)
+            spatial_dom = DOMTransformer.merge_tables(spatial_dom, tbl)
 
         if "formula_worker" in blackboard_results:
             f_md = FormulaAdapter.parse(blackboard_results["formula_worker"])
-            self._merge_formulas(spatial_dom, f_md)
+            spatial_dom = DOMTransformer.merge_formulas(spatial_dom, f_md)
 
         if "footnote_worker" in blackboard_results:
             fn = FootnoteAdapter.parse(blackboard_results["footnote_worker"])
-            self._merge_footnotes(spatial_dom, fn)
+            spatial_dom = DOMTransformer.merge_footnotes(spatial_dom, fn)
 
         if "form_worker" in blackboard_results:
             frm = FormAdapter.parse(blackboard_results["form_worker"])
-            self._merge_forms(spatial_dom, frm)
+            spatial_dom = DOMTransformer.merge_forms(spatial_dom, frm)
 
         images_dict = self._process_images(spatial_dom, job_dir, audit_trail)
-        self._translate_content(
+        spatial_dom = self._translate_content(
             spatial_dom, images_dict, doc_lang, job_dir, audit_trail
         )
 

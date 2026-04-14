@@ -2,9 +2,9 @@
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
 """
-Sanitization & Validation Facade (Hybrid Mode).
-Kombiniert KI-Labels mit dem Typografie-Experten (PyMuPDF),
-um übersehene Überschriften fehlerfrei anhand echter Font-Metriken zu taggen.
+Sanitization & Validation Facade (Typsicher).
+Kombiniert KI-Labels mit dem Typografie-Experten (PyMuPDF) und
+dem Multi-Signal HeadingClassifier, um übersehene Überschriften fehlerfrei zu taggen.
 """
 
 import logging
@@ -13,6 +13,7 @@ import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from src.domain.heading_classifier import HeadingClassifier
 from src.domain.spatial import SpatialDOM, SpatialElement
 
 logger = logging.getLogger("pdf-converter")
@@ -61,7 +62,7 @@ def _extract_typography_data(pdf_path: Path) -> Dict[int, List[Dict]]:
 def _flush_list(
     list_items: List[SpatialElement], new_elements: List[SpatialElement]
 ) -> None:
-    """Packt angesammelte Listen-Items in ein Listen-Tag."""
+    """Packt angesammelte Listen-Items typsicher in ein Listen-Tag."""
     if list_items:
         dict_items = [item.model_dump() for item in list_items]
         new_elements.append(SpatialElement(type="list", items=dict_items))
@@ -84,7 +85,7 @@ def _get_best_span(bbox: List[float], page_fonts: List[Dict]) -> Optional[Dict]:
 
 
 def _calculate_median_size(spatial_dom: SpatialDOM, page_fonts: Dict) -> float:
-    """Berechnet die Median-Schriftgröße des Dokuments."""
+    """Berechnet die Median-Schriftgröße des Dokuments typsicher."""
     all_sizes = [span["size"] for spans in page_fonts.values() for span in spans]
     if not all_sizes:
         for page in spatial_dom.pages:
@@ -118,7 +119,7 @@ def _process_heading(
     el_type: str,
     docling_head: bool,
 ) -> SpatialElement:
-    """Wandelt ein Element in eine validierte Überschrift um."""
+    """Wandelt ein SpatialElement in eine validierte Überschrift um."""
     if true_size > med * 1.8:
         raw_h = 1
     elif true_size > med * 1.4:
@@ -146,29 +147,6 @@ def _get_element_metrics(
         is_bold = best_span["is_bold"]
 
     return true_size, is_bold
-
-
-def _is_heading_candidate(
-    text: str,
-    el_type: str,
-    true_size: float,
-    is_bold: bool,
-    med: float,
-) -> Tuple[bool, bool]:
-    """Prüft, ob das Element semantisch und physisch eine Überschrift ist."""
-    is_form = text.startswith("$$") or text.startswith("\\")
-    is_cont = "@" in text and "." in text
-    mult = 1.15 if is_bold else 1.25
-
-    docling_h = el_type.startswith("h") and not is_cont
-    looks_h = (
-        (true_size > med * mult)
-        and (len(text.split()) < 15)
-        and not is_form
-        and not is_cont
-    )
-
-    return looks_h or docling_h, docling_h
 
 
 def _is_list_item_candidate(
@@ -203,7 +181,9 @@ def _process_page_elements(
             continue
 
         true_size, is_bold = _get_element_metrics(el, page_fonts)
-        is_heading, docling_h = _is_heading_candidate(
+
+        # Einsatz des Multi-Signal-Klassifikators (verhindert Font-SPOFs)
+        is_heading, docling_h = HeadingClassifier.is_heading(
             text, el_t, true_size, is_bold, med
         )
 
@@ -243,7 +223,8 @@ def repair_spatial_dom(
             page.elements, p_fonts.get(p_num, []), med_size, state
         )
 
-    return spatial_dom
+    # Re-Validierung, um zu garantieren, dass die Modifikationen den Contract erfüllen
+    return SpatialDOM.model_validate(spatial_dom.model_dump())
 
 
 def enforce_pdfua_heading_hierarchy(md_text: str) -> str:

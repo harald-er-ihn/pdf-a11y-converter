@@ -4,6 +4,7 @@
 """
 PDF Generator Modul (Semantic Overlay Pattern).
 Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
+Arbeitet nun zu 100% mit dem typisierten SpatialDOM.
 """
 
 import html
@@ -63,8 +64,8 @@ def _build_element_html(el: SpatialElement) -> str:
     """Generiert den HTML-String für ein einzelnes typisiertes Element."""
     tag = el.type
     bbox = el.bbox
-    w_box = max(bbox[2] - bbox[0], 10)
-    h_box = max(bbox[3] - bbox[1], 10)
+    w_box = max(bbox[2] - bbox[0], 10.0)
+    h_box = max(bbox[3] - bbox[1], 10.0)
     style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
         f"width: {w_box}pt; height: {h_box}pt; color: transparent; "
@@ -78,9 +79,9 @@ def _build_element_html(el: SpatialElement) -> str:
     if tag == "list":
         list_html = "<ul style='margin:0; padding:0; list-style-type:none;'>\n"
         for item in el.items or []:
-            ib = item.get("bbox", [0, 0, 10, 10])
-            iw = max(ib[2] - ib[0], 10)
-            ih = max(ib[3] - ib[1], 10)
+            ib = item.get("bbox", [0.0, 0.0, 10.0, 10.0])
+            iw = max(ib[2] - ib[0], 10.0)
+            ih = max(ib[3] - ib[1], 10.0)
             i_sty = (
                 f"position: absolute; left: {ib[0]}pt; "
                 f"top: {ib[1]}pt; width: {iw}pt; "
@@ -113,7 +114,7 @@ def _build_element_html(el: SpatialElement) -> str:
 
 
 def _create_html_document(spatial_dom: SpatialDOM, docinfo: dict, doc_lang: str) -> str:
-    """Baut das komplette HTML für WeasyPrint zusammen."""
+    """Baut das komplette HTML für WeasyPrint aus dem SpatialDOM auf."""
     html_pages = []
     for page in spatial_dom.pages:
         w, h = page.width, page.height
@@ -206,7 +207,7 @@ def generate_pdf_from_spatial(
     original_docinfo: dict,
     doc_lang: str,
 ) -> bool:
-    """Semantic Overlay Pattern via WeasyPrint."""
+    """Semantic Overlay Pattern via WeasyPrint (Typsicher)."""
     logger.info("🤖 Generiere unsichtbaren Layer (Semantic Overlay)...")
 
     full_html = _create_html_document(spatial_dom, original_docinfo, doc_lang)

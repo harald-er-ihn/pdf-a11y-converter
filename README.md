@@ -5,7 +5,7 @@
 [![Architecture](https://img.shields.io/badge/architecture-Clean%20Architecture-orange)](#)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-**Eine autarke, KI-gestützte Enterprise-Lösung zur PDF/UA-1 Rekonstruktion.**  
+**Semantischer Overlay-Compiler zur Rekonstruktion barrierefreier PDFs (PDF/UA).**  
 *Strikte Clean Architecture. Absolute Datenhoheit. Integrierte Endabnahme.*
 
 ---
@@ -44,17 +44,16 @@ Beim ersten Start erscheint daher möglicherweise die Meldung:
 ## 🎯 Die Vision: Das "Semantic Overlay" Prinzip
 
 Die nachträgliche Barrierefrei-Machung von PDFs scheitert meist an einem massiven Dilemma: 
-Baut man das PDF neu auf, zerstört man das exakte visuelle Layout. Nutzt man Cloud-Tools, verliert man die Datenhoheit.
+Baut man das PDF neu auf (Reflow), zerstört man das exakte visuelle Layout (Corporate Design, Metriken). Nutzt man Cloud-Tools, verliert man die Datenhoheit.
 
-Der **PDF A11y Converter** löst dieses Problem durch das **Semantic Overlay Pattern**:
+Der **PDF A11y Converter** fungiert daher nicht als klassischer Konverter, sondern als **Semantic Overlay Compiler**:
 1. **100% Visual Fidelity:** Das optische Erscheinungsbild des Original-PDFs bleibt auf den Pixel genau erhalten.
 2. **Semantische Tiefe:** Das Tool generiert einen komplett unsichtbaren, perfekten PDF/UA-1 Strukturbaum und stempelt das visuelle Original als für Screenreader unsichtbares Grafikelement (`/Artifact`) in den Hintergrund.
 
 ## 🧠 Architektur: Clean Architecture & Plugin Discovery
 
 Das System ist nach modernsten Software-Engineering-Standards in strikt getrennte Schichten (Application, Infrastructure, Plugins) unterteilt. 
-Jeder Spezialist läuft in einem isolierten `venv`. Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json`, validiert die Daten via *Pydantic* 
-und bindet die Worker zur Laufzeit als **Plugins** in die hochgradig parallelisierte Sensor-Fusion ein.
+Jeder Spezialist läuft in einem isolierten `venv`. Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json`, validiert die Daten via *Pydantic* anhand eines versionierten `SpatialDOM`-Vertrags und bindet die Worker zur Laufzeit als **Plugins** in die hochgradig parallelisierte Sensor-Fusion ein.
 
 ![Architektur des PDF A11y Converters](static/img/architecture_graph.svg)
 
@@ -62,8 +61,8 @@ und bindet die Worker zur Laufzeit als **Plugins** in die hochgradig parallelisi
 
 - **100% Native & Offline:** Keine Server, kein Docker, keine Cloud. Das gesamte Tool läuft nativ in Python auf dem lokalen System. 
 Alle KI-Frameworks werden durch harte Environment-Blocker an der Telemetrie gehindert (DSGVO & BSI konform).
-- **Multi-Core Parallelisierung:** Die KI-Worker laufen nicht nacheinander, sondern werden asynchron und parallel über alle verfügbaren CPU-Kerne verteilt.
-- **Graceful Degradation & Error Contracts:** Stürzt eine KI ab (z.B. GPU Out-of-Memory), fängt das System den Fehler via JSON-Contract ab. Die Konvertierung läuft mit Fallback-Werten stabil weiter.
+- **Multi-Core Parallelisierung & GPU-Locking:** Die KI-Worker laufen asynchron über alle CPUs. GPU-intensive Tasks werden intelligent gelockt, um VRAM-Kollisionen (Out-of-Memory) auszuschließen.
+- **Graceful Degradation & Error Contracts:** Stürzt eine KI ab, fängt das System den Fehler via JSON-Contract ab. Die Konvertierung läuft mit Fallback-Werten (z.B. Marker statt Docling) stabil weiter.
 - **Maschinenlesbarer Audit-Trail:** Für jedes PDF wird eine `audit.json` generiert, die Laufzeiten, GPU-Status und alle KI-Entscheidungen revisionssicher protokolliert.
 - **Integrierte Endabnahme:** Jedes Dokument wird lokal durch den offiziellen **veraPDF** Validator maschinell geprüft.
 

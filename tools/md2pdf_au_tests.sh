@@ -22,6 +22,7 @@ echo -e "\033[1;36m====================================================\033[0m" 
 #find tests/ -type f -name "*_pdfua.pdf" -delete
 find tests/ -type f -name "*.pdf" -delete
 find tests/ -type f -name "*_debug.html" -delete
+find tests/ -type f -name "*.json" -delete
 
 
 

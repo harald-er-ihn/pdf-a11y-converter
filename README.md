@@ -12,7 +12,8 @@
 
 ## 📥 Download (Standalone Versionen)
 
-Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige Pakete zur Verfügung. Da die integrierten KI-Modelle (PyTorch, YOLO, NLLB, etc.) für den lokalen Betrieb sehr groß sind, hosten wir die Pakete (ca. 3,5 GB) auf einem dedizierten High-Speed Cloud-Speicher der TU Dortmund.
+Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige Pakete zur Verfügung. 
+Da die integrierten KI-Modelle (PyTorch, YOLO, NLLB, etc.) für den lokalen Betrieb sehr groß sind, hosten wir die Pakete (ca. 1,0 GB) auf einem dedizierten High-Speed Cloud-Speicher der TU Dortmund.
 
 > 🔒 **Download-Passwort:** Aus Sicherheitsgründen erfordert der Universitäts-Server ein Passwort für den Download. Bitte nutze: **yBmqxDneq2**
 
@@ -27,22 +28,23 @@ Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige
 <details>
 <summary><b>🍏 Besonderer Hinweis für macOS-Nutzer (Apple Gatekeeper)</b></summary>
 
-Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. macOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. Beim ersten Start erscheint daher möglicherweise die Meldung: *"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
+Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. 
+MacOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. 
+Beim ersten Start erscheint daher möglicherweise die Meldung:
+*"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
 
-**Lösung 1 (Der Apple-Weg):**
+**Lösung:**
 1. Mache einen **Rechtsklick** auf die App `PDF-A11y-GUI`.
 2. Klicke im Kontextmenü auf **"Öffnen"**.
 3. Bestätige den folgenden Sicherheitsdialog mit **"Trotzdem öffnen"**.
-
-**Lösung 2 (Für Profis via Terminal):**
-`xattr -cr /Pfad/zum/entpackten/Ordner/PDF-A11y-GUI.app`
 </details>
 
 ---
 
 ## 🎯 Die Vision: Das "Semantic Overlay" Prinzip
 
-Die nachträgliche Barrierefrei-Machung von PDFs scheitert meist an einem massiven Dilemma: Baut man das PDF neu auf, zerstört man das exakte visuelle Layout. Nutzt man Cloud-Tools, verliert man die Datenhoheit.
+Die nachträgliche Barrierefrei-Machung von PDFs scheitert meist an einem massiven Dilemma: 
+Baut man das PDF neu auf, zerstört man das exakte visuelle Layout. Nutzt man Cloud-Tools, verliert man die Datenhoheit.
 
 Der **PDF A11y Converter** löst dieses Problem durch das **Semantic Overlay Pattern**:
 1. **100% Visual Fidelity:** Das optische Erscheinungsbild des Original-PDFs bleibt auf den Pixel genau erhalten.
@@ -50,15 +52,17 @@ Der **PDF A11y Converter** löst dieses Problem durch das **Semantic Overlay Pat
 
 ## 🧠 Architektur: Clean Architecture & Plugin Discovery
 
-Das System ist nach modernsten Software-Engineering-Standards in strikt getrennte Schichten (Application, Infrastructure, Plugins) unterteilt. Um die gefürchtete *Dependency Hell* moderner KI-Bibliotheken zu vermeiden, läuft jeder Spezialist in einem isolierten `venv`. 
-
-Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json` und bindet sie zur Laufzeit als **Plugins** in die Sensor-Fusion ein.
+Das System ist nach modernsten Software-Engineering-Standards in strikt getrennte Schichten (Application, Infrastructure, Plugins) unterteilt. 
+Jeder Spezialist läuft in einem isolierten `venv`. Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json`, validiert die Daten via *Pydantic* 
+und bindet die Worker zur Laufzeit als **Plugins** in die hochgradig parallelisierte Sensor-Fusion ein.
 
 ![Architektur des PDF A11y Converters](static/img/architecture_graph.svg)
 
 ## ✨ Enterprise Kern-Features
 
-- **100% On-Premise & Telemetrie-Frei:** Keine Cloud, keine APIs. Alle externen KI-Frameworks werden durch harte Environment-Blocker (`HF_HUB_OFFLINE`) an der Telemetrie gehindert (DSGVO & BSI konform).
+- **100% Native & Offline:** Keine Server, kein Docker, keine Cloud. Das gesamte Tool läuft nativ in Python auf dem lokalen System. 
+Alle KI-Frameworks werden durch harte Environment-Blocker an der Telemetrie gehindert (DSGVO & BSI konform).
+- **Multi-Core Parallelisierung:** Die KI-Worker laufen nicht nacheinander, sondern werden asynchron und parallel über alle verfügbaren CPU-Kerne verteilt.
 - **Graceful Degradation & Error Contracts:** Stürzt eine KI ab (z.B. GPU Out-of-Memory), fängt das System den Fehler via JSON-Contract ab. Die Konvertierung läuft mit Fallback-Werten stabil weiter.
 - **Maschinenlesbarer Audit-Trail:** Für jedes PDF wird eine `audit.json` generiert, die Laufzeiten, GPU-Status und alle KI-Entscheidungen revisionssicher protokolliert.
 - **Integrierte Endabnahme:** Jedes Dokument wird lokal durch den offiziellen **veraPDF** Validator maschinell geprüft.
@@ -68,7 +72,7 @@ Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json` und binde
 - **Layout & Struktur:** `docling` (IBM) und `marker-pdf`
 - **Tabellen-Präzision:** `pdfplumber`
 - **Wissenschaftliche Formeln:** `nougat-ocr` (Meta)
-- **Fußnoten & Zitate:** `grobid`
+- **Lokale Fußnoten-Heuristik:** `PyMuPDF`
 - **Bild-Beschreibungen:** `BLIP` (Salesforce)
 - **Formulare & Vektoren:** `pikepdf`
 - **Handschriften & Signaturen:** `YOLOv8s` (Lokales Offline-Modell)

@@ -11,7 +11,7 @@ import logging
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("pdf-converter")
 
@@ -129,16 +129,60 @@ def _process_heading(
     return el
 
 
+def _get_element_metrics(
+    el: Dict[str, Any], page_fonts: List[Dict]
+) -> Tuple[float, bool]:
+    """Ermittelt die exakte physische Schriftgröße und Formatierung."""
+    bbox = el.get("bbox", [0, 0, 0, 0])
+    true_size = abs(bbox[3] - bbox[1])
+    is_bold = False
+
+    best_span = _get_best_span(bbox, page_fonts)
+    if best_span:
+        true_size = best_span["size"]
+        is_bold = best_span["is_bold"]
+
+    return true_size, is_bold
+
+
+def _is_heading_candidate(
+    text: str, el_type: str, true_size: float, is_bold: bool, med: float
+) -> Tuple[bool, bool]:
+    """Prüft, ob das Element semantisch und physisch eine Überschrift ist."""
+    is_form = text.startswith("$$") or text.startswith("\\")
+    is_cont = "@" in text and "." in text
+    mult = 1.15 if is_bold else 1.25
+
+    docling_h = el_type.startswith("h") and not is_cont
+    looks_h = (
+        (true_size > med * mult)
+        and (len(text.split()) < 15)
+        and not is_form
+        and not is_cont
+    )
+
+    return looks_h or docling_h, docling_h
+
+
+def _is_list_item_candidate(
+    text: str, el_type: str, true_size: float, med: float
+) -> bool:
+    """Prüft, ob das Element ein Listenpunkt ist."""
+    is_mark = bool(re.match(r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", text))
+    return (el_type == "li" or is_mark) and true_size <= med * 1.3
+
+
 def _process_page_elements(
     elements: List[Dict], page_fonts: List[Dict], med: float, state: HeadingState
 ) -> List[Dict]:
     """Isolierte Verarbeitungsschleife für die Elemente einer Seite."""
     new_els: List[Dict] = []
     list_items: List[Dict] = []
+    valid_types = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li"}
 
     for el in elements:
         el_t = el.get("type", "p")
-        if el_t not in ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]:
+        if el_t not in valid_types:
             _flush_list(list_items, new_els)
             new_els.append(el)
             continue
@@ -147,33 +191,17 @@ def _process_page_elements(
         if not text:
             continue
 
-        bbox = el.get("bbox", [0, 0, 0, 0])
-        true_size = abs(bbox[3] - bbox[1])
-        is_bold = False
-
-        best_span = _get_best_span(bbox, page_fonts)
-        if best_span:
-            true_size = best_span["size"]
-            is_bold = best_span["is_bold"]
-
-        is_form = text.startswith("$$") or text.startswith("\\")
-        is_cont = "@" in text and "." in text
-        mult = 1.15 if is_bold else 1.25
-        docling_h = el_t.startswith("h") and not is_cont
-        looks_h = (
-            (true_size > med * mult)
-            and (len(text.split()) < 15)
-            and not is_form
-            and not is_cont
+        true_size, is_bold = _get_element_metrics(el, page_fonts)
+        is_heading, docling_h = _is_heading_candidate(
+            text, el_t, true_size, is_bold, med
         )
 
-        if looks_h or docling_h:
+        if is_heading:
             _flush_list(list_items, new_els)
             new_els.append(_process_heading(el, true_size, med, state, el_t, docling_h))
             continue
 
-        is_mark = bool(re.match(r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", text))
-        if (el_t == "li" or is_mark) and true_size <= med * 1.3:
+        if _is_list_item_candidate(text, el_t, true_size, med):
             el["type"] = "li"
             list_items.append(el)
             continue

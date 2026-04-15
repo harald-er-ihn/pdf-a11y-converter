@@ -116,3 +116,21 @@ class VisionAdapter:
         return {
             str(k): str(v) for k, v in raw_data.items() if k not in ("status", "error")
         }
+
+
+class ColumnAdapter:
+    """Kapselt Spalten-Extrakte in SpatialElements zur weiteren DOM-Fusion."""
+
+    @staticmethod
+    def parse(raw_data: Dict[str, Any]) -> Dict[int, List[SpatialElement]]:
+        result: Dict[int, List[SpatialElement]] = {}
+        for page in raw_data.get("pages", []):
+            p_num = page.get("page_num")
+            elements = []
+            for col in page.get("columns", []):
+                bbox = col.get("bbox", [0.0, 0.0, 0.0, 0.0])
+                idx = col.get("column_index", 0)
+                # Speichert den Index sicher als String-Information
+                elements.append(SpatialElement(type="column", bbox=bbox, text=str(idx)))
+            result[p_num] = elements
+        return result

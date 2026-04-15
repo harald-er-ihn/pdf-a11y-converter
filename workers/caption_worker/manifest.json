@@ -1,0 +1,6 @@
+{
+  "name": "caption_worker",
+  "script": "run_captions.py",
+  "timeout_sec": 120,
+  "phase": "map"
+}

@@ -40,9 +40,9 @@ def _is_page_number(text: str) -> bool:
 
 def extract_header_footer(pdf_path: Path) -> Dict[str, Any]:
     """Erkennt Header und Footer über Bounding Boxes und Häufigkeit."""
-    result: Dict[str, Any] = {"pages":[]}
+    result: Dict[str, Any] = {"pages": []}
     text_freq: Counter = Counter()
-    pages_data =[]
+    pages_data = []
 
     try:
         with fitz.open(pdf_path) as doc:
@@ -52,7 +52,7 @@ def extract_header_footer(pdf_path: Path) -> Dict[str, Any]:
             for page in doc:
                 ph = page.rect.height
                 blocks = page.get_text("dict").get("blocks", [])
-                page_blocks =[]
+                page_blocks = []
 
                 for b in blocks:
                     if b.get("type") != 0:  # Nur Textblöcke
@@ -62,7 +62,7 @@ def extract_header_footer(pdf_path: Path) -> Dict[str, Any]:
                     text = "".join(
                         s.get("text", "")
                         for line in b.get("lines", [])
-                        for s in line.get("spans",[])
+                        for s in line.get("spans", [])
                     ).strip()
 
                     if not text:
@@ -80,7 +80,7 @@ def extract_header_footer(pdf_path: Path) -> Dict[str, Any]:
             # Pass 2: Klassifizierung in Header/Footer
             for p_num, p_data in enumerate(pages_data, start=1):
                 ph = p_data["height"]
-                elements =[]
+                elements = []
 
                 for b in p_data["blocks"]:
                     text = b["text"]
@@ -155,9 +155,7 @@ def main() -> None:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-        elem_count = sum(
-            len(p.get("elements", [])) for p in extracted.get("pages",[])
-        )
+        elem_count = sum(len(p.get("elements", [])) for p in extracted.get("pages", []))
         logger.info("✅ %s Artifacts erfolgreich identifiziert.", elem_count)
 
     except Exception as e:  # pylint: disable=broad-exception-caught

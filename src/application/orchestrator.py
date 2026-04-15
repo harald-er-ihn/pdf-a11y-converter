@@ -6,6 +6,7 @@ Der Semantic Orchestrator.
 Leitet die PDF-Analyse, ruft isolierte Worker-Prozesse auf und sammelt.
 Implementiert Parallel-Execution, Blackboard-Pattern und Sensor-Fusion.
 Arbeitet jetzt zu 100% typsicher und delegiert Mutationen an den DOMTransformer.
+Zudem werden alle Worker-Koordinaten vor der Fusion in den PDF-Standard normalisiert.
 """
 
 import concurrent.futures
@@ -55,7 +56,7 @@ def _get_pdf_lang(input_path: Path) -> str:
                 if isinstance(lang_meta, list):
                     return str(lang_meta[0])
                 return str(lang_meta)
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.debug("XMP-Sprache nicht lesbar: %s", e)
 
     return "de-DE"
@@ -75,7 +76,7 @@ def _extract_original_metadata(input_path: Path) -> dict[str, str]:
                     meta["/Title"] = str(title_obj[0])
                 else:
                     meta["/Title"] = str(title_obj)
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.debug("Konnte Original-Metadaten nicht lesen: %s", e)
 
     if not meta.get("/Title"):
@@ -116,6 +117,19 @@ class SemanticOrchestrator:
 
         data = None
         err = None
+        coord_sys = "top_left_points"
+
+        # Manifest auslesen für Koordinaten-Deklaration
+        manifest_file = worker.worker_dir / "manifest.json"
+        if manifest_file.exists():
+            try:
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    manifest_data = json.load(f)
+                    coord_sys = manifest_data.get(
+                        "coordinate_system", "top_left_points"
+                    )
+            except Exception:
+                pass
 
         if target_json.exists():
             try:
@@ -142,6 +156,7 @@ class SemanticOrchestrator:
             "duration": duration,
             "data": data,
             "error": err,
+            "coord_sys": coord_sys,
         }
 
     def _assign_alt_texts_to_dom(
@@ -303,7 +318,7 @@ class SemanticOrchestrator:
                         img.copy(),
                         alt_texts.get(img_name, "Bild"),
                     )
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass
 
         return images_dict
@@ -334,6 +349,7 @@ class SemanticOrchestrator:
         }
 
         blackboard_results = {}
+        blackboard_coord_sys = {}
         map_workers = self.plugin_manager.get_map_workers()
 
         max_workers = len(map_workers) if map_workers else 1
@@ -364,6 +380,7 @@ class SemanticOrchestrator:
                     audit_trail["workers"][w_name]["error_details"] = res["error"]
                 elif res["success"] and res["data"]:
                     blackboard_results[w_name] = res["data"]
+                    blackboard_coord_sys[w_name] = res["coord_sys"]
                     logger.info("✅ '%s' fertig (%ss).", w_name, res["duration"])
 
         base_layout_name = None
@@ -384,6 +401,7 @@ class SemanticOrchestrator:
                     audit_trail["workers"][res["name"]]["error_details"] = res["error"]
                 elif res["success"] and res["data"]:
                     blackboard_results[res["name"]] = res["data"]
+                    blackboard_coord_sys[res["name"]] = res["coord_sys"]
                     base_layout_name = "layout_worker_marker"
                     logger.info("✅ '%s' fertig (%ss).", res["name"], res["duration"])
 
@@ -392,26 +410,40 @@ class SemanticOrchestrator:
             return SpatialDOM(), {}, audit_trail
 
         raw_spatial_dom = blackboard_results[base_layout_name]
+        layout_c_sys = blackboard_coord_sys.get(base_layout_name, "top_left_points")
 
         try:
             if base_layout_name == "layout_worker_docling":
-                spatial_dom = LayoutAdapter.normalize_docling(raw_spatial_dom)
+                spatial_dom = LayoutAdapter.normalize_docling(
+                    raw_spatial_dom, layout_c_sys
+                )
             else:
-                spatial_dom = LayoutAdapter.normalize_marker(raw_spatial_dom)
+                spatial_dom = LayoutAdapter.normalize_marker(
+                    raw_spatial_dom, layout_c_sys
+                )
 
             vis_recon = diagnostics.needs_visual_reconstruction
             spatial_dom.needs_visual_reconstruction = vis_recon
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             logger.error("❌ Spatial DOM Validierung fehlgeschlagen: %s", e)
             return SpatialDOM(), {}, audit_trail
 
-        # Sensor Fusion Layer (Typsicher über DOMTransformer)
+        # Für alle weiteren Worker: Extrahierte Seitenhöhen durchreichen
+        page_heights = {page.page_num: page.height for page in spatial_dom.pages}
+
+        # Sensor Fusion Layer (Typsicher über DOMTransformer + CoordinateAdapter)
         if "signature_worker" in blackboard_results:
-            sig = SignatureAdapter.parse(blackboard_results["signature_worker"])
+            c_sys = blackboard_coord_sys.get("signature_worker", "top_left_points")
+            sig = SignatureAdapter.parse(
+                blackboard_results["signature_worker"], c_sys, page_heights
+            )
             spatial_dom = DOMTransformer.merge_signatures(spatial_dom, sig)
 
         if "table_worker" in blackboard_results:
-            tbl = TableAdapter.parse(blackboard_results["table_worker"])
+            c_sys = blackboard_coord_sys.get("table_worker", "top_left_points")
+            tbl = TableAdapter.parse(
+                blackboard_results["table_worker"], c_sys, page_heights
+            )
             spatial_dom = DOMTransformer.merge_tables(spatial_dom, tbl)
 
         if "formula_worker" in blackboard_results:
@@ -419,7 +451,10 @@ class SemanticOrchestrator:
             spatial_dom = DOMTransformer.merge_formulas(spatial_dom, f_md)
 
         if "footnote_worker" in blackboard_results:
-            fn = FootnoteAdapter.parse(blackboard_results["footnote_worker"])
+            c_sys = blackboard_coord_sys.get("footnote_worker", "top_left_points")
+            fn = FootnoteAdapter.parse(
+                blackboard_results["footnote_worker"], c_sys, page_heights
+            )
             spatial_dom = DOMTransformer.merge_footnotes(spatial_dom, fn)
 
         if "form_worker" in blackboard_results:

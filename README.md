@@ -50,32 +50,62 @@ Der **PDF A11y Converter** fungiert daher nicht als klassischer Konverter, sonde
 1. **100% Visual Fidelity:** Das optische Erscheinungsbild des Original-PDFs bleibt auf den Pixel genau erhalten.
 2. **Semantische Tiefe:** Das Tool generiert einen komplett unsichtbaren, perfekten PDF/UA-1 Strukturbaum und stempelt das visuelle Original als für Screenreader unsichtbares Grafikelement (`/Artifact`) in den Hintergrund.
 
-## 🧠 Architektur: Clean Architecture & Plugin Discovery
+## 🧠 Architektur: Clean Architecture & Layout Graph Model
 
-Das System ist nach modernsten Software-Engineering-Standards in strikt getrennte Schichten (Application, Infrastructure, Plugins) unterteilt. 
-Jeder Spezialist läuft in einem isolierten `venv`. Die Engine scannt verfügbare KI-Modelle dynamisch via `manifest.json`, validiert die Daten via *Pydantic* anhand eines versionierten `SpatialDOM`-Vertrags und bindet die Worker zur Laufzeit als **Plugins** in die hochgradig parallelisierte Sensor-Fusion ein.
+Das System ist nach modernsten Software-Engineering-Standards in strikt getrennte Schichten (Domain, Application, Infrastructure, Plugins) unterteilt. 
+Die Kerninnovation ist der Einsatz eines **Topological Layout Graph Models**. Anstatt Bounding Boxes naiv und zerstörerisch zu überlagern, modelliert das System das Dokument als Graphen. Text-Aware Bipartite Matching, Spatial Constraint Solving und XY-Cut Sortierung garantieren eine perfekte Lesereihenfolge (Reading Order) ohne Datenverlust durch OCR-Drifts.
 
 ![Architektur des PDF A11y Converters](static/img/architecture_graph.svg)
 
 ## ✨ Enterprise Kern-Features
 
-- **100% Native & Offline:** Keine Server, kein Docker, keine Cloud. Das gesamte Tool läuft nativ in Python auf dem lokalen System. 
-Alle KI-Frameworks werden durch harte Environment-Blocker an der Telemetrie gehindert (DSGVO & BSI konform).
-- **Multi-Core Parallelisierung & GPU-Locking:** Die KI-Worker laufen asynchron über alle CPUs. GPU-intensive Tasks werden intelligent gelockt, um VRAM-Kollisionen (Out-of-Memory) auszuschließen.
-- **Graceful Degradation & Error Contracts:** Stürzt eine KI ab, fängt das System den Fehler via JSON-Contract ab. Die Konvertierung läuft mit Fallback-Werten (z.B. Marker statt Docling) stabil weiter.
-- **Maschinenlesbarer Audit-Trail:** Für jedes PDF wird eine `audit.json` generiert, die Laufzeiten, GPU-Status und alle KI-Entscheidungen revisionssicher protokolliert.
-- **Integrierte Endabnahme:** Jedes Dokument wird lokal durch den offiziellen **veraPDF** Validator maschinell geprüft.
+- **100% Native & Offline:** Keine Server, kein Docker, keine Cloud. Das gesamte Tool läuft nativ in Python. Alle KI-Frameworks werden durch harte Environment-Blocker an der Telemetrie gehindert (DSGVO & BSI konform).
+- **Topologische Graphen-Fusion:** Bounding-Box Kollisionen werden intelligent aufgelöst. Komplexe Layouts (Spalten, Footnotes, Captions) werden über Kanten (`ABOVE`, `COLUMN_OF`, `CAPTION_OF`) verknüpft und erhalten die PDF/UA-Lesereihenfolge strikt aufrecht.
+- **Fail-Fast Coordinate Layer:** Automatisierte und fehlertolerante Normierung diverser KI-Koordinatensysteme (Docling, PDF, YOLO-Pixel) in den einheitlichen PDF-Punkte-Standard.
+- **Graceful Degradation & Error Contracts:** Stürzt eine KI ab (z.B. VRAM Out-of-Memory), fängt das System den Fehler via JSON-Contract ab. Spatial Constraint Solver verhindern Datenverlust beim Fallback.
+- **Maschinenlesbarer Audit-Trail:** Laufzeiten, Worker-Ergebnisse und die integrierte Endabnahme (veraPDF) werden revisionssicher in einer `audit.json` protokolliert.
 
-## 🛠️ Die KI-Experten (Worker-Pool)
 
-- **Layout & Struktur:** `docling` (IBM) und `marker-pdf`
-- **Tabellen-Präzision:** `pdfplumber`
-- **Wissenschaftliche Formeln:** `nougat-ocr` (Meta)
-- **Lokale Fußnoten-Heuristik:** `PyMuPDF`
-- **Bild-Beschreibungen:** `BLIP` (Salesforce)
-- **Formulare & Vektoren:** `pikepdf`
-- **Handschriften & Signaturen:** `YOLOv8s` (Lokales Offline-Modell)
-- **i18n Übersetzung:** `NLLB-200` (Meta) 
+## 🛠️ Die KI‑Experten (Worker‑Pool)
+
+Der Converter nutzt eine modulare **Worker‑Architektur**. Jeder Worker übernimmt eine klar abgegrenzte Aufgabe bei der Analyse und Aufbereitung eines PDFs.
+
+### Layout & Dokumentstruktur
+
+- **layout_worker_docling** – Layoutanalyse mit *IBM Docling*
+- **layout_worker_marker** – alternative Layoutanalyse mit *marker-pdf*
+- **column_worker** – erkennt mehrspaltige Dokumentlayouts
+
+### Dokumentstruktur-Elemente
+
+- **header_footer_worker** – erkennt Kopf- und Fußzeilen
+- **footnote_worker** – extrahiert und verknüpft Fußnoten
+- **caption_worker** – erkennt Bild- und Tabellenbeschriftungen
+
+### Tabellen & Formulare
+
+- **table_worker** – präzise Tabellenextraktion (z. B. mit *pdfplumber*)
+- **form_worker** – erkennt Formularfelder und Eingabeelemente
+
+### Wissenschaftliche Inhalte
+
+- **formula_worker** – erkennt mathematische Formeln (z. B. *Nougat OCR*)
+
+### Visuelle Inhalte
+
+- **vision_worker** – analysiert Bilder und erzeugt Bildbeschreibungen (z. B. *BLIP*)
+
+### Handschriften & Signaturen
+
+- **signature_worker** – erkennt Signaturen und handschriftliche Markierungen (z. B. *YOLOv8*)
+
+### Mehrsprachigkeit
+
+- **translation_worker** – automatische Übersetzung mit *NLLB‑200*
+
+### Gemeinsame Infrastruktur
+
+- **workers/common/** – gemeinsame Utilities für Logging, Fehlerbehandlung, Torch‑Konfiguration und Cleanup
 
 ## 🚀 Installation & Nutzung (für Entwickler)
 

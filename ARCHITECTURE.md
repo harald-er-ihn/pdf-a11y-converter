@@ -2,47 +2,47 @@
 
 Dieses Dokument beschreibt die architektonischen Designentscheidungen, Patterns und Datenflüsse des PDF A11y Converters. 
 
-Das System wurde nach den Prinzipien der **Clean Architecture** (Ports & Adapters) entwickelt. Das oberste Paradigma bei der Entwicklung war: **Qualität, Isolation, Auditierbarkeit und Stabilität vor Komplexität.**
+Das System wurde nach den Prinzipien der **Clean Architecture** entwickelt. Das oberste Paradigma bei der Entwicklung war: **Qualität, Isolation, Auditierbarkeit und deterministische Stabilität vor Komplexität.**
 
 ## 1. Clean Architecture & Plugin Discovery
 
-Um Dependency-Hell und Monolithen-Verfall zu verhindern, ist die Architektur in strikte Schichten unterteilt:
-- **Application Layer (`src/application/`)**: Enthält ausschließlich die Geschäftslogik (den `SemanticOrchestrator`). Sie weiß *was* zu tun ist, aber nicht *wie* es technisch umgesetzt wird.
-- **Infrastructure Layer (`src/infrastructure/`)**: Implementiert die technischen Details (WeasyPrint, veraPDF, Dateisystem-Zugriffe, PyMuPDF-Adapter).
-- **Plugin Layer (`src/plugins/`)**: Verwaltet die isolierten KI-Experten.
-
-**Dynamisches Worker-Discovery:**
-Die Engine kennt die KI-Worker nicht mehr hardcodiert. Stattdessen scannt ein `PluginManager` beim Start das Verzeichnis `workers/`. Jeder Worker besitzt eine `manifest.json` (Contract), die seine Fähigkeiten, seine Ausführungsphase (`map` oder `reduce`) und sein striktes Laufzeit-Timeout definiert. Neue KI-Modelle können somit als Drop-In Plugins hinzugefügt werden.
+Um Dependency-Hell zu verhindern, ist die Architektur strikt unterteilt:
+- **Domain Layer (`src/domain/`)**: Enthält vertragliche Typisierungen (`SpatialDOM`) sowie die reinen Geschäftsregeln (Geometrie, Bipartite Matching, Layout Graphs, Constraint Solving). Keine Abhängigkeiten zu externen Frameworks.
+- **Application Layer (`src/application/`)**: Der `SemanticOrchestrator` steuert den Datenfluss. Der `DOMTransformer` wendet die Domain-Regeln auf das SpatialDOM an.
+- **Infrastructure Layer (`src/infrastructure/`)**: Implementiert die technischen Details (WeasyPrint, veraPDF Endabnahme).
+- **Plugin Layer (`src/plugins/` & `workers/`)**: Verwaltet isolierte KI-Experten in eigenen Venvs, die dynamisch via `manifest.json` gefunden und koordiniert werden.
 
 ## 2. Das "Semantic Overlay" Pattern (Der Compiler-Ansatz)
 
-Die klassische Erstellung von barrierefreien PDFs basiert auf HTML-to-PDF-Engines, die den Text neu setzen (Reflow). Das zerstört jedoch oft das originäre Corporate Design und verändert das Originaldokument juristisch. Dieses Projekt agiert stattdessen als **Semantic Overlay Compiler**:
+Die klassische Erstellung von barrierefreien PDFs basiert auf HTML-to-PDF-Engines, die den Text neu setzen (Reflow). Das zerstört jedoch oft das Corporate Design. Dieses Projekt agiert als **Semantic Overlay Compiler**:
+1. Extraktion millimetergenauer Koordinaten aus dem Original.
+2. Generierung eines leeren PDFs via *WeasyPrint*, dessen Text unsichtbar (`color: transparent`), aber mit PDF/UA-1 Tags versehen ist.
+3. Das optische Original-PDF wird als Vektorgrafik (`/Artifact`) in den Hintergrund gestempelt.
 
-1. Die Worker extrahieren millimetergenaue Koordinaten (Bounding Boxes) aller Elemente aus dem Original-PDF.
-2. Der Generator erzeugt via *WeasyPrint* ein leeres PDF, dessen Text unsichtbar (`color: transparent`), aber mit perfekten PDF/UA-1 Tags an den exakten physischen Koordinaten versehen ist.
-3. Das optische Original-PDF wird via `pikepdf` als Vektor-Grafik unter diese unsichtbare Struktur gestempelt und als `/Artifact` deklariert (für Screenreader unsichtbar).
+## 3. Topologische Graphen-Fusion & Sensor Fusion Pipeline
 
-## 3. Blackboard Pattern & Sensor Fusion
+Das System geht weit über naive Bounding-Box Überlagerungen hinaus. Die Fusion von Layouts, Tabellen, Captions und Signaturen passiert in mehreren, streng überwachten Phasen:
 
-Die Klasse `SemanticOrchestrator` fungiert als Steuerzentrale über das versionierte `SpatialDOM`:
-1. **Map-Phase:** Alle registrierten Basis-Worker (Layout, Tabellen, Formeln, Fußnoten) werden parallel auf das Ziel-PDF angesetzt. Sie hinterlassen ihre Ergebnisse im temporären Job-Verzeichnis (dem "Blackboard").
-2. **Adapter & Validierung:** Die Ergebnisse der Worker durchlaufen strikte Adapter, um das System gegen unangekündigte Schema-Änderungen in Drittanbieter-Modellen abzusichern.
-3. **Reduce-Phase (Sensor Fusion):** Die Engine liest die validierten Daten. Sie verwebt hochpräzise Tabellen, komplexe Formeln und Signatur-Labels nahtlos mit dem Fließtext und entfernt dank Bounding-Box-Kollisionsprüfung redundanten Text-Müll. Nachgelagerte Worker (wie Translation oder Vision) reichern die fusionierten Daten weiter an.
+### A. Coordinate Anti-Corruption Layer
+Worker liefern unterschiedliche Koordinaten (Docling = Top-Left, PDF = Bottom-Left, YOLO = Pixel). Der `CoordinateAdapter` normalisiert *alle* Worker-Boxen per Fail-Fast-Contract in den PDF-Standard (Top-Left, 72 DPI), bevor sie das SpatialDOM berühren.
 
-## 4. Enterprise Error Contract, Locking & Graceful Degradation
+### B. Text-Aware Bipartite Matching
+Eine rein geometrische Überlappungsprüfung (IoU) ist bei leichten OCR-Drifts unbrauchbar. Der `SpatialMatcher` nutzt eine gewichtete Fusion (Alpha * IoU + Beta * Levenshtein Text Similarity). Tabellen und Fragmente matchen dadurch selbst bei leicht verschobenen Bounding-Boxes zielsicher mit den Layout-Texten.
 
-KI-Modelle können abstürzen (z.B. durch GPU Out-Of-Memory). Um höchste Enterprise-Stabilität zu gewährleisten:
+### C. Spatial Constraint Solving (Graceful Fallback)
+Stürzt der High-End Layout-Worker ab, liefert der Fallback-Worker (Marker) oft nur einen gigantischen Text-Block für die ganze Seite. Wenn nun ein anderer Worker eine Tabelle mitten im Text findet, zerreißt der `SpatialConstraintSolver` den großen Textblock deterministisch. Er führt eine "räumliche Subtraktion" durch, um das kleinere Element passend einzubetten, ohne die angrenzenden Originaltexte zu vernichten.
+
+### D. Topological Layout Graph Model & XY-Cut
+Neue Elemente werden nicht mehr einfach an das DOM angehängt (was die Screenreader-Lesereihenfolge zerstören würde). Das Dokument wird in den `LayoutGraph` überführt. Knoten werden über Kanten wie `COLUMN_OF`, `ABOVE`, `CAPTION_OF` vernetzt. Abschließend sortiert ein deterministischer XY-Cut-Algorithmus alle Elemente in die perfekte, PDF/UA-konforme *Reading Order*.
+
+## 4. Enterprise Error Contract & Locking
+
 - **GPU-Locking:** Der `WorkerRunner` serialisiert Zugriffe auf die Grafikkarte thread-sicher, während CPU-Tasks hochparallel weiterlaufen.
-- **Central Error Contract:** Stürzt ein Worker dennoch ab, schreibt er ein standardisiertes `error.json` zurück an den Orchestrator. 
-- **Graceful Degradation:** Das System führt einen strukturierten Fallback durch (z.B. von *Docling* auf *Marker* oder auf Standard-Alt-Texte) und die Konvertierung läuft stabil weiter.
+- **Error Contracts:** Stürzt ein Worker ab (z.B. OOM-Error in PyTorch), schreibt er ein standardisiertes `error.json` an den Orchestrator. Das System degeneriert *graceful* und läuft mit Fallbacks weiter.
 
-## 5. Audit Trail Logging
+## 5. Audit Trail & Telemetrie-freie Isolation
 
-Für den Einsatz in Konzernen und Behörden muss jede KI-Entscheidung nachvollziehbar sein. Der Orchestrator schreibt parallel zum fertigen PDF eine maschinenlesbare `audit.json`. Diese enthält:
-- Laufzeiten aller Worker auf die Millisekunde genau.
-- Die detaillierten Error-Contracts (falls ein Worker degradiert ist).
-- Die exakten Preflight-Diagnosen (Ghost-Fonts, fehlendes Embedding).
-- Den kryptografischen Validierungs-Stempel der veraPDF-Endabnahme.
+Für den Einsatz in Konzernen und Behörden protokolliert die Engine eine maschinenlesbare `audit.json`. Diese enthält Laufzeiten, Degradations-Gründe, Preflight-Ergebnisse und das kryptografische veraPDF Endabnahme-Siegel. Harte Environment-Flags blocken PyTorch/HuggingFace Tracking ab und garantieren 100% On-Premise Compliance.
 
 ## 6. Telemetrie-freie Runtime-Isolation
 

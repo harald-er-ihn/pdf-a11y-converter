@@ -4,7 +4,7 @@
 """
 DOM Transformer Layer (Sensor Fusion).
 Kapselt alle Mutationen des SpatialDOM in typsichere Operationen.
-Stellt sicher, dass der Domain-Contract gewahrt bleibt.
+Delegiert die Konfliktauflösung an das Layout Graph Model.
 """
 
 import logging
@@ -12,10 +12,7 @@ import re
 from typing import Dict, List
 
 from src.domain.spatial import SpatialDOM, SpatialElement
-from src.domain.spatial_matching import SpatialMatcher
-from src.domain.layout_sorting import sort_by_reading_order
-from src.domain.spatial_constraints import SpatialConstraintSolver
-from src.domain.geometry import bbox_area
+from src.domain.layout_graph import LayoutGraph
 
 logger = logging.getLogger("pdf-converter")
 
@@ -35,54 +32,38 @@ class DOMTransformer:
         worker_elements: List[SpatialElement],
     ) -> List[SpatialElement]:
         """
-        Führt DOM Injection durch. Löst Subtraktionen über den Constraint Solver,
-        falls ein Layout-Block massiv größer ist als das injizierte Element
-        (behebt das Marker-Fallback-Verlust-Problem).
+        Führt die Graph-basierte Sensor Fusion durch.
+        SpatialDOM -> LayoutGraph -> Fusion -> Sorted DOM
         """
-        if not worker_elements:
-            return layout_elements
+        graph = LayoutGraph.build_layout_graph(layout_elements)
+        graph.fuse_worker_elements(worker_elements)
+        return graph.compute_reading_order()
 
-        current_layout = list(layout_elements)
+    @classmethod
+    def merge_columns(
+        cls, dom: SpatialDOM, columns: Dict[int, List[SpatialElement]]
+    ) -> SpatialDOM:
+        """Reichert das DOM mit Spalten-Metadaten für die Topologie an."""
+        for page in dom.pages:
+            if page.page_num in columns:
+                page.elements.extend(columns[page.page_num])
+        return cls._validate_and_return(dom)
 
-        # Sequenzielle Verarbeitung: Löst das Problem, dass mehrere Elemente
-        # (z.B. 2 Tabellen) in denselben großen Basis-Block fallen können.
-        for w_el in worker_elements:
-            matches = SpatialMatcher.match_elements(current_layout, [w_el])
-
-            if matches:
-                # matches liefert {layout_idx: worker_idx (0)}
-                l_idx = next(iter(matches.keys()))
-                l_el = current_layout[l_idx]
-
-                area_l = bbox_area(l_el.bbox)
-                area_w = bbox_area(w_el.bbox)
-
-                # Spatial Constraint Solving: Wenn das Basis-Element massiv größer
-                # ist (>50% mehr Fläche), extrahieren wir die Tabelle geometrisch.
-                if area_l > area_w * 1.5:
-                    sub_text = SpatialMatcher._extract_text(w_el)
-                    split_els = SpatialConstraintSolver.insert_element_at_position(
-                        l_el, w_el, sub_text
-                    )
-                    # Ersetze den massiven Block durch die gesplitteten Fragmente
-                    current_layout = (
-                        current_layout[:l_idx] + split_els + current_layout[l_idx + 1 :]
-                    )
-                else:
-                    # Reguläre Injection (direkter Replace bei ähnlicher Größe)
-                    current_layout[l_idx] = w_el
-            else:
-                current_layout.append(w_el)
-
-        return sort_by_reading_order(current_layout)
+    @classmethod
+    def merge_captions(
+        cls, dom: SpatialDOM, captions: Dict[int, List[SpatialElement]]
+    ) -> SpatialDOM:
+        """Reichert das DOM mit Captions für die Verknüpfung an."""
+        for page in dom.pages:
+            if page.page_num in captions:
+                page.elements.extend(captions[page.page_num])
+        return cls._validate_and_return(dom)
 
     @classmethod
     def merge_signatures(
-        cls,
-        dom: SpatialDOM,
-        signatures: Dict[int, List[SpatialElement]],
+        cls, dom: SpatialDOM, signatures: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Fügt Signatur-Elemente typsicher via Injection in den DOM ein."""
+        """Fügt Signatur-Elemente typsicher via Graph Fusion in den DOM ein."""
         for page in dom.pages:
             if page.page_num in signatures:
                 page.elements = cls._inject_and_sort(
@@ -92,9 +73,7 @@ class DOMTransformer:
 
     @classmethod
     def merge_tables(
-        cls,
-        dom: SpatialDOM,
-        table_pages: Dict[int, List[SpatialElement]],
+        cls, dom: SpatialDOM, table_pages: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
         """Ersetzt Text durch Tabellen anhand von Constraint Solving & Bipartite Matching."""
         for page in dom.pages:
@@ -106,29 +85,23 @@ class DOMTransformer:
 
     @classmethod
     def merge_footnotes(
-        cls,
-        dom: SpatialDOM,
-        footnote_pages: Dict[int, List[SpatialElement]],
+        cls, dom: SpatialDOM, footnote_pages: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Weist Fußnoten anhand von Text-Aware Bipartite Matching typsicher zu."""
+        """Weist Fußnoten anhand der Graphen-Topologie typsicher zu."""
         for page in dom.pages:
             if page.page_num in footnote_pages:
-                f_elements = footnote_pages[page.page_num]
-                matches = SpatialMatcher.match_elements(page.elements, f_elements)
-
-                for idx, base_el in enumerate(page.elements):
-                    if idx in matches:
-                        base_el.type = "Note"
-
-                page.elements = sort_by_reading_order(page.elements)
+                page.elements = cls._inject_and_sort(
+                    page.elements, footnote_pages[page.page_num]
+                )
         return cls._validate_and_return(dom)
 
     @classmethod
     def merge_forms(cls, dom: SpatialDOM, forms: List[SpatialElement]) -> SpatialDOM:
-        """Fügt AcroForm-Felder typsicher in die erste Seite ein."""
+        """Fügt AcroForm-Felder typsicher in die erste Seite ein und sortiert."""
         if forms and dom.pages:
             dom.pages[0].elements.extend(forms)
-            dom.pages[0].elements = sort_by_reading_order(dom.pages[0].elements)
+            graph = LayoutGraph.build_layout_graph(dom.pages[0].elements)
+            dom.pages[0].elements = graph.compute_reading_order()
         return cls._validate_and_return(dom)
 
     @classmethod

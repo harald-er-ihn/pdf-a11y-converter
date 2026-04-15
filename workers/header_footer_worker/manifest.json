@@ -1,0 +1,6 @@
+{
+  "name": "header_footer_worker",
+  "script": "run_header_footer.py",
+  "timeout_sec": 120,
+  "phase": "map"
+}

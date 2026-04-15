@@ -44,8 +44,9 @@ class TableAdapter:
         result: Dict[int, List[SpatialElement]] = {}
         for page in raw_data.get("pages", []):
             p_num = page.get("page_num")
-            elements = [
-                SpatialElement.model_validate(e) for e in page.get("elements", [])
+            elements =[
+                SpatialElement.model_validate(e)
+                for e in page.get("elements", [])
             ]
             result[p_num] = elements
         return result
@@ -57,10 +58,11 @@ class FootnoteAdapter:
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> Dict[int, List[SpatialElement]]:
         result: Dict[int, List[SpatialElement]] = {}
-        for page in raw_data.get("pages", []):
+        for page in raw_data.get("pages",[]):
             p_num = page.get("page_num")
-            elements = [
-                SpatialElement.model_validate(e) for e in page.get("elements", [])
+            elements =[
+                SpatialElement.model_validate(e)
+                for e in page.get("elements", [])
             ]
             result[p_num] = elements
         return result
@@ -72,10 +74,11 @@ class SignatureAdapter:
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> Dict[int, List[SpatialElement]]:
         result: Dict[int, List[SpatialElement]] = {}
-        for page in raw_data.get("pages", []):
+        for page in raw_data.get("pages",[]):
             p_num = page.get("page_num")
-            elements = [
-                SpatialElement.model_validate(e) for e in page.get("elements", [])
+            elements =[
+                SpatialElement.model_validate(e)
+                for e in page.get("elements", [])
             ]
             result[p_num] = elements
         return result
@@ -86,8 +89,8 @@ class FormAdapter:
 
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> List[SpatialElement]:
-        elements: List[SpatialElement] = []
-        for field in raw_data.get("fields", []):
+        elements: List[SpatialElement] =[]
+        for field in raw_data.get("fields",[]):
             name = field.get("name", "")
             alt_text = field.get("alt_text", "")
             elements.append(
@@ -114,7 +117,9 @@ class VisionAdapter:
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> Dict[str, str]:
         return {
-            str(k): str(v) for k, v in raw_data.items() if k not in ("status", "error")
+            str(k): str(v)
+            for k, v in raw_data.items()
+            if k not in ("status", "error")
         }
 
 
@@ -124,13 +129,40 @@ class ColumnAdapter:
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> Dict[int, List[SpatialElement]]:
         result: Dict[int, List[SpatialElement]] = {}
-        for page in raw_data.get("pages", []):
+        for page in raw_data.get("pages",[]):
             p_num = page.get("page_num")
             elements = []
-            for col in page.get("columns", []):
+            for col in page.get("columns",[]):
                 bbox = col.get("bbox", [0.0, 0.0, 0.0, 0.0])
                 idx = col.get("column_index", 0)
                 # Speichert den Index sicher als String-Information
-                elements.append(SpatialElement(type="column", bbox=bbox, text=str(idx)))
+                elements.append(
+                    SpatialElement(
+                        type="column",
+                        bbox=bbox,
+                        text=str(idx)
+                    )
+                )
+            result[p_num] = elements
+        return result
+
+
+class HeaderFooterAdapter:
+    """Kapselt Header/Footer-Extrakte (Artifacts)."""
+
+    @staticmethod
+    def parse(raw_data: Dict[str, Any]) -> Dict[int, List[SpatialElement]]:
+        result: Dict[int, List[SpatialElement]] = {}
+        for page in raw_data.get("pages",[]):
+            p_num = page.get("page_num")
+            elements = []
+            for el in page.get("elements",[]):
+                elements.append(
+                    SpatialElement(
+                        type="artifact",
+                        bbox=el.get("bbox",[0.0, 0.0, 0.0, 0.0]),
+                        text=el.get("artifact_type", "artifact")
+                    )
+                )
             result[p_num] = elements
         return result

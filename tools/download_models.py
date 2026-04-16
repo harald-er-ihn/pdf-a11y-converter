@@ -4,14 +4,16 @@
 
 import sys
 import os
+import subprocess
 from pathlib import Path
 
-# Sicherstellen, dass das 'huggingface_hub' Modul für den Download da ist
+# Self-Healing: Installiert huggingface_hub automatisch, falls es im Dev-Venv fehlt
 try:
     from huggingface_hub import snapshot_download
 except ImportError:
-    print("❌ huggingface_hub fehlt! Installiere es mit: pip install huggingface_hub")
-    sys.exit(1)
+    print("📦 Paket 'huggingface_hub' fehlt. Wird automatisch für den Download installiert...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "huggingface_hub", "-q"])
+    from huggingface_hub import snapshot_download
 
 def download_hf_model(repo_id: str, target_dir: Path):
     """Lädt ein HuggingFace Repository direkt in den Zielordner herunter."""

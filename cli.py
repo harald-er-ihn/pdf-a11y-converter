@@ -18,6 +18,9 @@ from pathlib import Path
 os.environ["GIO_USE_VFS"] = "local"
 os.environ["GLIB_LOG_LEVEL"] = "4"
 
+from src.config import inject_windows_dlls
+inject_windows_dlls()  # MUSS vor dem Import von WeasyPrint ausgeführt werden!
+
 from src.application.orchestrator import extract_to_spatial
 from src.infrastructure.pdf.generator import generate_pdf_from_spatial
 from src.infrastructure.validation.validation import check_verapdf, get_verapdf_version

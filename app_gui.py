@@ -26,6 +26,9 @@ import customtkinter as ctk
 from PIL import Image
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
+from src.config import inject_windows_dlls
+inject_windows_dlls()  # MUSS vor dem Import von WeasyPrint ausgeführt werden!
+
 # Backend-Importe
 from src.application.orchestrator import extract_to_spatial
 from src.infrastructure.pdf.generator import generate_pdf_from_spatial

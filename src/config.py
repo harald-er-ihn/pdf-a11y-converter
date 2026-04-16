@@ -71,3 +71,23 @@ def get_model_cache_dir() -> Path:
             logger.warning("Fehler beim Lesen der config.json: %s", e)
 
     return Path(os.environ.get("MODEL_CACHE_DIR", Path.home() / ".pdf-a11y-models"))
+
+
+def inject_windows_dlls() -> None:
+    """
+    WINDOWS-FIX: Injiziert gebündelte GTK3/Pango/Cairo DLLs in den Python-Prozess,
+    bevor WeasyPrint importiert wird. Macht das Tool 100% portabel.
+    """
+    import os
+    import sys
+
+    if sys.platform == "win32":
+        gtk_bin_path = get_resource_path("resources/windows/gtk3/bin")
+        if gtk_bin_path.exists():
+            # 1. Für subprocesses und ältere Module in den PATH legen
+            os.environ["PATH"] = (
+                f"{gtk_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+            )
+            # 2. Ab Python 3.8 MÜSSEN DLL-Pfade unter Windows explizit registriert werden!
+            if hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(str(gtk_bin_path))

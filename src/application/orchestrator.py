@@ -352,7 +352,9 @@ class SemanticOrchestrator:
         blackboard_coord_sys = {}
         map_workers = self.plugin_manager.get_map_workers()
 
-        max_workers = len(map_workers) if map_workers else 1
+        
+        max_workers = min(2, len(map_workers)) if map_workers else 1  # Drosselung für Windows!
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
             futures = []
             for worker in map_workers:

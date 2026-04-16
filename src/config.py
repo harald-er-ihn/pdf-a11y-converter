@@ -3,6 +3,7 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Konfigurations-Modul für zentrale Einstellungen und Pfad-Auflösungen.
+Integriert das deterministische Offline-Modellverzeichnis.
 """
 
 import json
@@ -24,9 +25,17 @@ def _get_app_base_dir() -> Path:
 
 def get_resource_path(relative_path: str) -> Path:
     """Ermittelt den Pfad für PyInstaller-gebündelte Ressourcen (_MEIPASS)."""
-    # Pylint Fix: Sicheres Abrufen des dynamischen Attributs ohne Exception
     base_path = Path(getattr(sys, "_MEIPASS", Path.cwd()))
     return base_path / relative_path
+
+
+# --- NEU: Globale Modell-Konstanten ---
+MODEL_DIR = get_resource_path("resources/models")
+
+def get_model_path(name: str) -> Path:
+    """Gibt den absoluten Pfad zu einem lokalen Modell zurück."""
+    return MODEL_DIR / name
+# --------------------------------------
 
 
 def get_worker_python(worker_name: str) -> Path:
@@ -47,47 +56,24 @@ def get_worker_python(worker_name: str) -> Path:
 
 
 def get_model_cache_dir() -> Path:
-    """Liest den OS-spezifischen Modell-Cache-Pfad aus der config.json."""
-    config_path = get_resource_path("config/config.json")
-
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                cache_setting = config["paths"]["model_cache_dir"]
-
-                if isinstance(cache_setting, dict):
-                    sys_name = platform.system().lower()
-                    path_str = cache_setting.get(
-                        sys_name, cache_setting.get("default", "~/.pdf-a11y-models")
-                    )
-                else:
-                    path_str = cache_setting
-
-                resolved_path = os.path.expandvars(os.path.expanduser(path_str))
-                return Path(resolved_path)
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("Fehler beim Lesen der config.json: %s", e)
-
+    """Fallback-Cache-Verzeichnis (sollte für Modelle nicht mehr primär genutzt werden)."""
     return Path(os.environ.get("MODEL_CACHE_DIR", Path.home() / ".pdf-a11y-models"))
 
-
 def inject_windows_dlls() -> None:
-    """
-    WINDOWS-FIX: Injiziert gebündelte GTK3/Pango/Cairo DLLs in den Python-Prozess,
-    bevor WeasyPrint importiert wird. Macht das Tool 100% portabel.
-    """
-    import os
-    import sys
-
+    """WINDOWS-FIX: Injiziert gebündelte GTK3/Pango/Cairo DLLs in den Python-Prozess."""
     if sys.platform == "win32":
-        gtk_bin_path = get_resource_path("resources/windows/gtk3/bin")
+        base_path = get_resource_path("resources/windows/gtk3")
+        gtk_bin_path = base_path / "bin"
+        gtk_etc_path = base_path / "etc" / "fonts"
+
+        os.environ["GIO_USE_VOLUME_MONITOR"] = "unix"
+        os.environ["G_MESSAGES_DEBUG"] = "none"
+
         if gtk_bin_path.exists():
-            # 1. Für subprocesses und ältere Module in den PATH legen
-            os.environ["PATH"] = (
-                f"{gtk_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
-            )
-            # 2. Ab Python 3.8 MÜSSEN DLL-Pfade unter Windows explizit registriert werden!
+            os.environ["PATH"] = f"{gtk_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
             if hasattr(os, "add_dll_directory"):
                 os.add_dll_directory(str(gtk_bin_path))
+                
+        if gtk_etc_path.exists():
+            os.environ["FONTCONFIG_PATH"] = str(gtk_etc_path)
+            os.environ["FONTCONFIG_FILE"] = str(gtk_etc_path / "fonts.conf")

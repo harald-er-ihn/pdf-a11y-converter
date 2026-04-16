@@ -3,18 +3,27 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für die Bildbeschreibung (BLIP).
-Fängt GPU OOM-Errors sauber per Contract ab.
+Lädt das Modell zwingend und deterministisch aus dem lokalen resources-Ordner.
 """
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-# 🚀 SYSTEM-PATH FIX
+# 🚀 OFFLINE-MODE ERZWINGEN (Muss VOR den Imports von torch/transformers passieren)
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+# SYSTEM-PATH FIX
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
+
+# Dynamische, sichere Pfadauflösung (funktioniert lokal und in der compilierten .exe)
+PROJECT_ROOT = WORKER_ROOT.parent
+LOCAL_MODEL_DIR = PROJECT_ROOT / "resources" / "models" / "blip"
 
 from common import (
     cleanup_memory,
@@ -26,9 +35,9 @@ from common import (
 logger = setup_worker_logging("vision-worker")
 configure_torch_runtime()
 
-import torch  # pylint: disable=wrong-import-position
-from PIL import Image  # pylint: disable=wrong-import-position
-from transformers import BlipForConditionalGeneration, BlipProcessor  # pylint: disable=wrong-import-position
+import torch
+from PIL import Image
+from transformers import BlipForConditionalGeneration, BlipProcessor
 
 
 def main() -> None:
@@ -47,27 +56,30 @@ def main() -> None:
     with open(input_json, "r", encoding="utf-8") as f:
         images_dict = json.load(f)
 
-    logger.info("🤖 Lade Vision-Experten (BLIP)...")
-    model_id = "Salesforce/blip-image-captioning-base"
+    logger.info("🤖 Lade Vision-Experten (BLIP) lokal aus: %s", LOCAL_MODEL_DIR.name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("Verwende Hardware: %s", device.upper())
+
+    if not LOCAL_MODEL_DIR.exists():
+        msg = f"Lokales Modell fehlt in {LOCAL_MODEL_DIR}"
+        logger.error("❌ %s", msg)
+        write_error_contract(output_json, "ModelNotFound", msg)
+        sys.exit(1)
 
     model = None
     processor = None
 
     try:
-        processor = BlipProcessor.from_pretrained(model_id)
-        model = BlipForConditionalGeneration.from_pretrained(model_id).to(device).eval()
+        # local_files_only=True verbietet HuggingFace selbst den Versions-Check
+        processor = BlipProcessor.from_pretrained(str(LOCAL_MODEL_DIR), local_files_only=True)
+        model = BlipForConditionalGeneration.from_pretrained(str(LOCAL_MODEL_DIR), local_files_only=True).to(device).eval()
 
         results = {}
         for img_name, img_path_str in images_dict.items():
             img_path = Path(img_path_str)
             if not img_path.exists():
-                logger.warning("Bild nicht gefunden: %s", img_path)
                 results[img_name] = "Bild"
                 continue
 
-            logger.info("Analysiere %s...", img_name)
             with Image.open(img_path) as pil_img:
                 pil_img = pil_img.convert("RGB")
                 inputs = processor(pil_img, return_tensors="pt").to(device)
@@ -75,9 +87,7 @@ def main() -> None:
                 with torch.no_grad():
                     output = model.generate(**inputs, max_new_tokens=40)
 
-                alt_text = processor.decode(
-                    output[0], skip_special_tokens=True
-                ).capitalize()
+                alt_text = processor.decode(output[0], skip_special_tokens=True).capitalize()
                 results[img_name] = alt_text
 
         with open(output_json, "w", encoding="utf-8") as f:
@@ -85,27 +95,16 @@ def main() -> None:
 
         logger.info("✅ Vision-Extraktion erfolgreich abgeschlossen.")
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        # 🚀 OOM ERROR ABFANGEN!
+    except Exception as e:
         if "OutOfMemoryError" in type(e).__name__:
-            logger.error("❌ GPU Out of Memory im Vision-Worker!")
-            write_error_contract(
-                output_json,
-                "OutOfMemory",
-                "Grafikkartenspeicher (VRAM) ist voll. Fallback auf Standard-Alt-Texte.",
-            )
+            write_error_contract(output_json, "OutOfMemory", "Grafikkartenspeicher (VRAM) ist voll.")
         else:
-            logger.error("❌ Fataler Fehler im Vision-Worker: %s", e)
             write_error_contract(output_json, type(e).__name__, str(e))
         sys.exit(1)
-
     finally:
-        if model is not None:
-            del model
-        if processor is not None:
-            del processor
+        del model
+        del processor
         cleanup_memory(aggressive=True)
-
 
 if __name__ == "__main__":
     main()

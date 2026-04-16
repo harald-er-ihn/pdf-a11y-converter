@@ -65,47 +65,21 @@ Die Kerninnovation ist der Einsatz eines **Topological Layout Graph Models**. An
 - **Graceful Degradation & Error Contracts:** Stürzt eine KI ab (z.B. VRAM Out-of-Memory), fängt das System den Fehler via JSON-Contract ab. Spatial Constraint Solver verhindern Datenverlust beim Fallback.
 - **Maschinenlesbarer Audit-Trail:** Laufzeiten, Worker-Ergebnisse und die integrierte Endabnahme (veraPDF) werden revisionssicher in einer `audit.json` protokolliert.
 
+## 🛠️ Die KI-Experten (Worker-Pool)
 
-## 🛠️ Die KI‑Experten (Worker‑Pool)
+Dank der dynamischen Plugin-Architektur (Manifest Discovery) laufen aktuell **12 spezialisierte Worker** isoliert voneinander:
 
-Der Converter nutzt eine modulare **Worker‑Architektur**. Jeder Worker übernimmt eine klar abgegrenzte Aufgabe bei der Analyse und Aufbereitung eines PDFs.
-
-### Layout & Dokumentstruktur
-
-- **layout_worker_docling** – Layoutanalyse mit *IBM Docling*
-- **layout_worker_marker** – alternative Layoutanalyse mit *marker-pdf*
-- **column_worker** – erkennt mehrspaltige Dokumentlayouts
-
-### Dokumentstruktur-Elemente
-
-- **header_footer_worker** – erkennt Kopf- und Fußzeilen
-- **footnote_worker** – extrahiert und verknüpft Fußnoten
-- **caption_worker** – erkennt Bild- und Tabellenbeschriftungen
-
-### Tabellen & Formulare
-
-- **table_worker** – präzise Tabellenextraktion (z. B. mit *pdfplumber*)
-- **form_worker** – erkennt Formularfelder und Eingabeelemente
-
-### Wissenschaftliche Inhalte
-
-- **formula_worker** – erkennt mathematische Formeln (z. B. *Nougat OCR*)
-
-### Visuelle Inhalte
-
-- **vision_worker** – analysiert Bilder und erzeugt Bildbeschreibungen (z. B. *BLIP*)
-
-### Handschriften & Signaturen
-
-- **signature_worker** – erkennt Signaturen und handschriftliche Markierungen (z. B. *YOLOv8*)
-
-### Mehrsprachigkeit
-
-- **translation_worker** – automatische Übersetzung mit *NLLB‑200*
-
-### Gemeinsame Infrastruktur
-
-- **workers/common/** – gemeinsame Utilities für Logging, Fehlerbehandlung, Torch‑Konfiguration und Cleanup
+- **Layout & Struktur:** `docling` (IBM) und `marker-pdf`
+- **Tabellen-Präzision:** `pdfplumber`
+- **Wissenschaftliche Formeln:** `nougat-ocr` (Meta)
+- **Handschriften & Signaturen:** `YOLOv8s` (Lokales Offline-Modell)
+- **Bild-Beschreibungen (Vision):** `BLIP` (Salesforce)
+- **i18n Übersetzung:** `NLLB-200` (Meta) 
+- **Formular-Erkennung:** `pikepdf` (AcroForms)
+- **Spalten-Erkennung (Columns):** `PyMuPDF` (Heuristik & XY-Histogramm)
+- **Fußnoten-Erkennung:** `PyMuPDF` (Heuristik)
+- **Beschriftungen (Captions):** `PyMuPDF` (Heuristik)
+- **Header & Footer (Artifacts):** `PyMuPDF` (Frequenzanalyse)
 
 ## 🚀 Installation & Nutzung (für Entwickler)
 

@@ -21,7 +21,6 @@ def assemble_target(target_name: str) -> None:
     """Baut die isolierte Laufzeitumgebung für das angegebene Target zusammen."""
     print(f"\n📦 Assembly Phase für '{target_name}'...")
     target_dir = DIST_DIR / target_name
-
     internal_dir = target_dir / "_internal"
 
     # 1. Ressourcen kopieren
@@ -55,9 +54,10 @@ def assemble_target(target_name: str) -> None:
 
                 # 100% Offline: Standard Venv-Generierung
                 subprocess.run(
-                    [sys.executable, "-m", "venv", str(venv_dir)], check=True
+                    [sys.executable, "-m", "venv", str(venv_dir.resolve())], check=True
                 )
 
+                # WINDOWS-FIX: Korrekte Erkennung des Python-Interpreters im Venv
                 if sys.platform == "win32":
                     py_exe = venv_dir / "Scripts" / "python.exe"
                 else:
@@ -66,7 +66,7 @@ def assemble_target(target_name: str) -> None:
                 # Sicherheits-Upgrade: Verhindert Rust/Maturin Kompilierungsfehler
                 subprocess.run(
                     [
-                        str(py_exe),
+                        str(py_exe.resolve()),
                         "-m",
                         "pip",
                         "install",
@@ -80,20 +80,27 @@ def assemble_target(target_name: str) -> None:
                 )
 
                 try:
+                    # WINDOWS-FIX: DEVNULL entfernt, stderr/stdout abfangen,
+                    # um Pip-Abstürze (z.B. Long Paths) debuggen zu können.
+                    # Sicheres Encoding verhindert Crash auf deutschen Windows-Systemen.
                     subprocess.run(
                         [
-                            str(py_exe),
+                            str(py_exe.resolve()),
                             "-m",
                             "pip",
                             "install",
                             "-r",
-                            str(worker_dir / "requirements.txt"),
+                            str((worker_dir / "requirements.txt").resolve()),
                         ],
                         check=True,
-                        stdout=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
                     )
-                except subprocess.CalledProcessError:
+                except subprocess.CalledProcessError as e:
                     print(f"\n❌ FEHLER beim Installieren von {worker_dir.name}!")
+                    print(f"   Grund:\n{e.stderr or e.stdout}")
                     print(
                         "Achten Sie darauf, dass Sie für KI-Pakete Python 3.12 nutzen."
                     )

@@ -8,30 +8,46 @@ Kompiliert die Hauptanwendung (GUI & CLI) in strikt getrennte Verzeichnisse.
 
 import os
 import shutil
+import stat
+import sys
 import warnings
 from pathlib import Path
 
 import customtkinter
 import PyInstaller.__main__
 
-os.environ["LANG"] = "C"
-os.environ["LC_ALL"] = "C"
+# WINDOWS-FIX: OS-Spracheinstellungen nur auf POSIX-Systemen erzwingen,
+# da Windows-Codepages durch LANG="C" irritiert werden können.
+if sys.platform != "win32":
+    os.environ["LANG"] = "C"
+    os.environ["LC_ALL"] = "C"
+
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyInstaller")
 
-# 🚀 FIX: Zeigt jetzt korrekt auf das Verzeichnis, in dem build.py liegt
 ROOT_DIR = Path(__file__).resolve().parent
 DIST_DIR = ROOT_DIR / "dist"
 BUILD_DIR = ROOT_DIR / "build_temp"
+CTK_PATH = Path(customtkinter.__file__).parent.resolve()
 
-CTK_PATH = Path(customtkinter.__file__).parent
+
+def _remove_readonly(func, path, _):
+    """
+    WINDOWS-FIX: Fehler-Handler für shutil.rmtree.
+    Entfernt den Read-Only-Schutz von Dateien, die unter Windows (z.B. von git)
+    schreibgeschützt angelegt wurden, damit rmtree nicht abstürzt.
+    """
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 
 def clean_directories() -> None:
-    """Bereinigt alte Build-Artefakte."""
+    """Bereinigt alte Build-Artefakte robust auf allen Systemen."""
     print("🧹 Bereinige alte Builds...")
     for d in [DIST_DIR, BUILD_DIR]:
         if d.exists():
-            shutil.rmtree(d, ignore_errors=True)
+            # WINDOWS-FIX: onexc (Python 3.12+) ersetzt onerror und
+            # behandelt hartnäckige Windows-Dateisperren.
+            shutil.rmtree(d, onexc=_remove_readonly)
 
 
 def build_gui() -> None:
@@ -48,6 +64,7 @@ def build_gui() -> None:
         str(BUILD_DIR),
         "--distpath",
         str(DIST_DIR),
+        # WINDOWS-FIX: os.pathsep garantiert ; auf Windows und : auf Linux
         f"--add-data={CTK_PATH}{os.pathsep}customtkinter/",
         f"--add-data={ROOT_DIR / 'config' / 'config.json'}{os.pathsep}config/",
         f"--add-data={ROOT_DIR / 'config' / 'nllb_mapping.json'}{os.pathsep}config/",
@@ -84,8 +101,8 @@ def build_cli() -> None:
         f"--add-data={ROOT_DIR / 'ARCHITECTURE.md'}{os.pathsep}.",
         "--hidden-import=pymupdf",
         "--hidden-import=fitz",
-        "--exclude-module=customtkinter",  # CLI braucht keine GUI
-        "--exclude-module=tkinter",  # CLI braucht keine GUI
+        "--exclude-module=customtkinter",
+        "--exclude-module=tkinter",
         "--exclude-module=tensorboard",
         "--noconfirm",
     ]

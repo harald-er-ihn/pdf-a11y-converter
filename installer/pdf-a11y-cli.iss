@@ -1,4 +1,6 @@
 [Setup]
+DiskSpanning=yes
+DiskSliceSize=max
 AppName=PDF A11y Converter CLI
 AppVersion=0.1.0
 AppPublisher=Dr. Harald Hutter

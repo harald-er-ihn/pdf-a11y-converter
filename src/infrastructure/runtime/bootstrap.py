@@ -56,7 +56,7 @@ class VenvPatcher:
                 lines = f.readlines()
 
             needs_update = False
-            new_lines =[]
+            new_lines = []
 
             for line in lines:
                 if line.startswith("home ="):
@@ -64,10 +64,10 @@ class VenvPatcher:
                     if current_home != expected_home:
                         needs_update = True
                     new_lines.append(f"home = {expected_home}\n")
-                
+
                 elif line.startswith("executable ="):
                     new_lines.append(f"executable = {expected_exe}\n")
-                
+
                 else:
                     new_lines.append(line)
 

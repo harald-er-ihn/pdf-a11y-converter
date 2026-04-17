@@ -70,8 +70,16 @@ def main() -> None:
 
     try:
         # local_files_only=True verbietet HuggingFace selbst den Versions-Check
-        processor = BlipProcessor.from_pretrained(str(LOCAL_MODEL_DIR), local_files_only=True)
-        model = BlipForConditionalGeneration.from_pretrained(str(LOCAL_MODEL_DIR), local_files_only=True).to(device).eval()
+        processor = BlipProcessor.from_pretrained(
+            str(LOCAL_MODEL_DIR), local_files_only=True
+        )
+        model = (
+            BlipForConditionalGeneration.from_pretrained(
+                str(LOCAL_MODEL_DIR), local_files_only=True
+            )
+            .to(device)
+            .eval()
+        )
 
         results = {}
         for img_name, img_path_str in images_dict.items():
@@ -87,7 +95,9 @@ def main() -> None:
                 with torch.no_grad():
                     output = model.generate(**inputs, max_new_tokens=40)
 
-                alt_text = processor.decode(output[0], skip_special_tokens=True).capitalize()
+                alt_text = processor.decode(
+                    output[0], skip_special_tokens=True
+                ).capitalize()
                 results[img_name] = alt_text
 
         with open(output_json, "w", encoding="utf-8") as f:
@@ -97,7 +107,9 @@ def main() -> None:
 
     except Exception as e:
         if "OutOfMemoryError" in type(e).__name__:
-            write_error_contract(output_json, "OutOfMemory", "Grafikkartenspeicher (VRAM) ist voll.")
+            write_error_contract(
+                output_json, "OutOfMemory", "Grafikkartenspeicher (VRAM) ist voll."
+            )
         else:
             write_error_contract(output_json, type(e).__name__, str(e))
         sys.exit(1)
@@ -105,6 +117,7 @@ def main() -> None:
         del model
         del processor
         cleanup_memory(aggressive=True)
+
 
 if __name__ == "__main__":
     main()

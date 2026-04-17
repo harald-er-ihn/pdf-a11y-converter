@@ -33,9 +33,9 @@ def get_java_paths():
     # 2. Nicht gefunden -> Automatisch herunterladen!
     logger.info("☕ Java (JRE) wird für veraPDF heruntergeladen (einmalig)...")
 
-    api_os = (
-        "windows" if system == "windows" else ("mac" if system == "darwin" else "linux")
-    )
+    
+    api_os = "windows" if system == "windows" else "linux"
+    
     arch = platform.machine().lower()
     api_arch = (
         "x64"

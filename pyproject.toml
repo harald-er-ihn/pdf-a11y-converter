@@ -72,3 +72,5 @@ line-length = 88
 
 [tool.ruff.lint.per-file-ignores]
 "workers/**/*.py" = ["E402"]
+"cli.py" =["E402"]
+"app_gui.py" = ["E402"]

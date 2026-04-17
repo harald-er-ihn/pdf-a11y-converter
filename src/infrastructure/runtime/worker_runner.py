@@ -38,7 +38,7 @@ class WorkerRunner:
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
-        
+
         # WICHTIG: Offline-Modus für Produktion erzwingen!
         env["HF_HUB_OFFLINE"] = "1"
         env["HF_HUB_DISABLE_TELEMETRY"] = "1"

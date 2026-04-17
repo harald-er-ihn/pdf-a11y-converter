@@ -22,7 +22,9 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 PROJECT_ROOT = WORKER_ROOT.parent
-LOCAL_MODEL_PATH = PROJECT_ROOT / "resources" / "models" / "yolov8" / "yolov8s_signature.pt"
+LOCAL_MODEL_PATH = (
+    PROJECT_ROOT / "resources" / "models" / "yolov8" / "yolov8s_signature.pt"
+)
 
 from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
 
@@ -35,13 +37,13 @@ from ultralytics import YOLO
 
 
 def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
-    spatial_data: Dict[str, Any] = {"pages":[]}
+    spatial_data: Dict[str, Any] = {"pages": []}
     model = None
 
     try:
         if not LOCAL_MODEL_PATH.exists():
             raise FileNotFoundError(f"Lokales Modell fehlt: {LOCAL_MODEL_PATH}")
-            
+
         # Lädt exakt diese Datei (Offline garantiert)
         model = YOLO(str(LOCAL_MODEL_PATH))
 
@@ -52,7 +54,7 @@ def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
                 results = model(img, verbose=False)
-                elements =[]
+                elements = []
 
                 for result in results:
                     for box in result.boxes:
@@ -67,7 +69,9 @@ def extract_signatures(pdf_path: Path) -> Dict[str, Any]:
                         )
 
                 if elements:
-                    spatial_data["pages"].append({"page_num": page_num, "elements": elements})
+                    spatial_data["pages"].append(
+                        {"page_num": page_num, "elements": elements}
+                    )
 
     except Exception as e:
         logger.warning("⚠️ Signatur-Erkennung übersprungen (%s)", e)
@@ -94,6 +98,7 @@ def main() -> None:
     output_json.parent.mkdir(parents=True, exist_ok=True)
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(extracted, f, ensure_ascii=False, indent=2)
+
 
 if __name__ == "__main__":
     main()

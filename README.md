@@ -12,7 +12,7 @@
 
 ## 📥 Download (Standalone Versionen)
 
-Für Windows und macOS stellen wir komplett vorkompilierte, 100% offline-fähige Pakete zur Verfügung. 
+Für Windows 11 stellen wir komplett vorkompilierte, 100% offline-fähige Pakete zur Verfügung. 
 Da die integrierten KI-Modelle (PyTorch, YOLO, NLLB, etc.) für den lokalen Betrieb sehr groß sind, hosten wir die Pakete (ca. 1,0 GB) auf einem dedizierten High-Speed Cloud-Speicher der TU Dortmund.
 
 > 🔒 **Download-Passwort:** Aus Sicherheitsgründen erfordert der Universitäts-Server ein Passwort für den Download. Bitte nutze: **yBmqxDneq2**
@@ -21,23 +21,6 @@ Da die integrierten KI-Modelle (PyTorch, YOLO, NLLB, etc.) für den lokalen Betr
 - [⬇️ Download PDF-A11y-Converter (Windows) .zip](https://tu-dortmund.sciebo.de/s/ijbi8cCZgHazMtr)
 - **SHA256:** `7a15f547b61f46cf8646540aa3e208e32c914b953f81cdd248cc642134c85905`
 
-### 🍎 macOS (Apple Silicon & Intel)
-- [⬇️ Download PDF-A11y-Converter (macOS) .zip](https://tu-dortmund.sciebo.de/s/GqCmHs7PK9pwKFr)
-- **SHA256:** `b071f98561597bdd90348a9c44774f717b7a01329f0428cab7e2b2d80bea0b4d`
-
-<details>
-<summary><b>🍏 Besonderer Hinweis für macOS-Nutzer (Apple Gatekeeper)</b></summary>
-
-Da dieses Tool ein echtes, lokales Open-Source-Projekt ist, verzichten wir auf kostenpflichtige Apple-Entwicklerzertifikate. 
-MacOS markiert heruntergeladene Programme aus dem Internet standardmäßig mit einem Quarantäne-Flag. 
-Beim ersten Start erscheint daher möglicherweise die Meldung:
-*"Kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann."*
-
-**Lösung:**
-1. Mache einen **Rechtsklick** auf die App `PDF-A11y-GUI`.
-2. Klicke im Kontextmenü auf **"Öffnen"**.
-3. Bestätige den folgenden Sicherheitsdialog mit **"Trotzdem öffnen"**.
-</details>
 
 ---
 
@@ -83,7 +66,7 @@ Dank der dynamischen Plugin-Architektur (Manifest Discovery) laufen aktuell **12
 
 ## 🚀 Installation & Nutzung (für Entwickler)
 
-*Voraussetzung: Python 3.12+, Linux/macOS/Windows.*
+*Voraussetzung: Python 3.12+, Linux und Windows 11.*
 
 ```bash
 # 1. Repository klonen

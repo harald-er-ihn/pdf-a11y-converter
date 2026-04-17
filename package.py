@@ -77,7 +77,7 @@ def build_installer(iss_file: Path, iscc_path: Path) -> None:
 def main() -> None:
     print("🚀 Starte Phase 3: Installer Packaging (Inno Setup)...")
 
-    # WINDOWS-FIX: Linux/macOS Graceful Exit
+    # WINDOWS-FIX: Linux Graceful Exit
     if sys.platform != "win32":
         print(
             "⚠️ Phase 3 (Inno Setup) wird übersprungen, da das System nicht Windows ist."

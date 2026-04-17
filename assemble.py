@@ -32,7 +32,7 @@ def ensure_embedded_runtime(internal_dir: Path) -> None:
         return
 
     print("  -> Lade Python 3.12 Embedded Runtime herunter...")
-    
+
     cache_dir = Path.home() / ".pdf-a11y-models" / "build_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     zip_path = cache_dir / "python-3.12.9-embed-amd64.zip"
@@ -57,7 +57,8 @@ def ensure_embedded_runtime(internal_dir: Path) -> None:
         pth_file.write_text(lines, encoding="utf-8")
 
     print("  ✅ Embedded Runtime erfolgreich bereitgestellt.")
-    
+
+
 def assemble_target(target_name: str) -> None:
     """Baut die isolierte Laufzeitumgebung für das angegebene Target zusammen."""
     print(f"\n📦 Assembly Phase für '{target_name}'...")
@@ -66,7 +67,7 @@ def assemble_target(target_name: str) -> None:
 
     # Runtime injeziieren
     ensure_embedded_runtime(internal_dir)
-    
+
     # 1. Ressourcen kopieren
     src_resources = ROOT_DIR / "resources"
     dst_resources = internal_dir / "resources"

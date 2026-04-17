@@ -6,10 +6,8 @@ Konfigurations-Modul für zentrale Einstellungen und Pfad-Auflösungen.
 Integriert das deterministische Offline-Modellverzeichnis.
 """
 
-import json
 import logging
 import os
-import platform
 import sys
 from pathlib import Path
 
@@ -32,9 +30,12 @@ def get_resource_path(relative_path: str) -> Path:
 # --- NEU: Globale Modell-Konstanten ---
 MODEL_DIR = get_resource_path("resources/models")
 
+
 def get_model_path(name: str) -> Path:
     """Gibt den absoluten Pfad zu einem lokalen Modell zurück."""
     return MODEL_DIR / name
+
+
 # --------------------------------------
 
 
@@ -59,6 +60,7 @@ def get_model_cache_dir() -> Path:
     """Fallback-Cache-Verzeichnis (sollte für Modelle nicht mehr primär genutzt werden)."""
     return Path(os.environ.get("MODEL_CACHE_DIR", Path.home() / ".pdf-a11y-models"))
 
+
 def inject_windows_dlls() -> None:
     """WINDOWS-FIX: Injiziert gebündelte GTK3/Pango/Cairo DLLs in den Python-Prozess."""
     if sys.platform == "win32":
@@ -70,10 +72,12 @@ def inject_windows_dlls() -> None:
         os.environ["G_MESSAGES_DEBUG"] = "none"
 
         if gtk_bin_path.exists():
-            os.environ["PATH"] = f"{gtk_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+            os.environ["PATH"] = (
+                f"{gtk_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+            )
             if hasattr(os, "add_dll_directory"):
                 os.add_dll_directory(str(gtk_bin_path))
-                
+
         if gtk_etc_path.exists():
             os.environ["FONTCONFIG_PATH"] = str(gtk_etc_path)
             os.environ["FONTCONFIG_FILE"] = str(gtk_etc_path / "fonts.conf")

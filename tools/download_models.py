@@ -3,7 +3,6 @@
 # Lädt die notwendigen KI-Modelle direkt in den deterministischen lokalen Projektordner.
 
 import sys
-import os
 import subprocess
 from pathlib import Path
 
@@ -11,30 +10,36 @@ from pathlib import Path
 try:
     from huggingface_hub import snapshot_download
 except ImportError:
-    print("📦 Paket 'huggingface_hub' fehlt. Wird automatisch für den Download installiert...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "huggingface_hub", "-q"])
+    print(
+        "📦 Paket 'huggingface_hub' fehlt. Wird automatisch für den Download installiert..."
+    )
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "huggingface_hub", "-q"]
+    )
     from huggingface_hub import snapshot_download
+
 
 def download_hf_model(repo_id: str, target_dir: Path):
     """Lädt ein HuggingFace Repository direkt in den Zielordner herunter."""
     print(f"\n📥 Lade '{repo_id}' herunter...\n   Ziel: {target_dir}")
     target_dir.mkdir(parents=True, exist_ok=True)
-    
-    # local_dir_use_symlinks=False ist entscheidend für Windows! Es zwingt HF, 
+
+    # local_dir_use_symlinks=False ist entscheidend für Windows! Es zwingt HF,
     # die ECHTEN Dateien (.safetensors, .json) dorthin zu legen, statt kryptische Cache-Symlinks.
     snapshot_download(
         repo_id=repo_id,
         local_dir=str(target_dir),
         local_dir_use_symlinks=False,
-        resume_download=True
+        resume_download=True,
     )
     print(f"✅ Download von {repo_id} abgeschlossen.")
+
 
 def main():
     root_dir = Path(__file__).resolve().parent.parent
     models_dir = root_dir / "resources" / "models"
 
-    print(f"🚀 Starte Offline-Modell-Seed-Run...")
+    print("🚀 Starte Offline-Modell-Seed-Run...")
     print(f"📂 Speicherort: {models_dir}\n")
 
     # 1. BLIP Vision Modell
@@ -48,7 +53,10 @@ def main():
     download_hf_model("facebook/nougat-small", models_dir / "nougat")
 
     print("\n🎉 Alle Modelle wurden erfolgreich in 'resources/models' gespeichert!")
-    print("Du kannst dieses Verzeichnis (oder das gebaute Release) nun auf 100% isolierten Offline-Maschinen ausführen.")
+    print(
+        "Du kannst dieses Verzeichnis (oder das gebaute Release) nun auf 100% isolierten Offline-Maschinen ausführen."
+    )
+
 
 if __name__ == "__main__":
     main()

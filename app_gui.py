@@ -29,6 +29,10 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from src.config import inject_windows_dlls
 inject_windows_dlls()  # MUSS vor dem Import von WeasyPrint ausgeführt werden!
 
+# JIT-Patching der Worker-Umgebungen
+from src.infrastructure.runtime.bootstrap import VenvPatcher
+VenvPatcher.patch_all_venvs()
+
 # Backend-Importe
 from src.application.orchestrator import extract_to_spatial
 from src.infrastructure.pdf.generator import generate_pdf_from_spatial

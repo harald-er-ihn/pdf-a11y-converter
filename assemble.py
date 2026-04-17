@@ -11,18 +11,62 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import urllib.request
+import zipfile
 
 ROOT_DIR = Path(__file__).resolve().parent
 DIST_DIR = ROOT_DIR / "dist"
 TARGETS = ["pdf-a11y-gui", "pdf-a11y-cli"]
 
 
+def ensure_embedded_runtime(internal_dir: Path) -> None:
+    """
+    Sorgt dafür, dass eine portierbare Python 3.12 Laufzeitumgebung
+    für Windows im End-Release mitgeliefert wird.
+    """
+    if sys.platform != "win32":
+        return
+
+    runtime_target = internal_dir / "python_runtime"
+    if runtime_target.exists():
+        return
+
+    print("  -> Lade Python 3.12 Embedded Runtime herunter...")
+    
+    cache_dir = Path.home() / ".pdf-a11y-models" / "build_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = cache_dir / "python-3.12.9-embed-amd64.zip"
+
+    # 1. Download der offiziellen CPython Embedded Version
+    if not zip_path.exists():
+        url = "https://www.python.org/ftp/python/3.12.9/python-3.12.9-embed-amd64.zip"
+        urllib.request.urlretrieve(url, zip_path)
+
+    # 2. Entpacken in das Release-Verzeichnis (_internal/python_runtime)
+    runtime_target.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(runtime_target)
+
+    # 3. WICHTIGER HACK: Embedded Python ignoriert standardmäßig site-packages!
+    # Wir müssen in der python312._pth Datei das Import-System ('import site')
+    # entkommentieren, sonst können die Venvs ihre Pakete nicht laden.
+    pth_file = runtime_target / "python312._pth"
+    if pth_file.exists():
+        lines = pth_file.read_text(encoding="utf-8")
+        lines = lines.replace("#import site", "import site")
+        pth_file.write_text(lines, encoding="utf-8")
+
+    print("  ✅ Embedded Runtime erfolgreich bereitgestellt.")
+    
 def assemble_target(target_name: str) -> None:
     """Baut die isolierte Laufzeitumgebung für das angegebene Target zusammen."""
     print(f"\n📦 Assembly Phase für '{target_name}'...")
     target_dir = DIST_DIR / target_name
     internal_dir = target_dir / "_internal"
 
+    # Runtime injeziieren
+    ensure_embedded_runtime(internal_dir)
+    
     # 1. Ressourcen kopieren
     src_resources = ROOT_DIR / "resources"
     dst_resources = internal_dir / "resources"

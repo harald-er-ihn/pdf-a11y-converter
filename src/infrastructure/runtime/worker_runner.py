@@ -38,22 +38,21 @@ class WorkerRunner:
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
+        
+        # WICHTIG: Offline-Modus für Produktion erzwingen!
         env["HF_HUB_OFFLINE"] = "1"
         env["HF_HUB_DISABLE_TELEMETRY"] = "1"
         env["DISABLE_TELEMETRY"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
 
-        if getattr(sys, "frozen", False) and sys.platform == "win32":
-            int_dir = Path(sys.executable).parent / "_internal"
-            py_exe = int_dir / "python_runtime" / "python.exe"
-            env["PYTHONPATH"] = str(manifest.worker_dir / "libs")
-        else:
-            w_venv = manifest.worker_dir / "venv"
-            py_exe = (
-                w_venv / "Scripts" / "python.exe"
-                if sys.platform == "win32"
-                else w_venv / "bin" / "python"
-            )
+        # WINDOWS-FIX: Wir nutzen IMMER das generierte Venv aus assemble.py,
+        # egal ob wir im Dev-Modus oder im kompilierten PyInstaller-Build sind!
+        w_venv = manifest.worker_dir / "venv"
+        py_exe = (
+            w_venv / "Scripts" / "python.exe"
+            if sys.platform == "win32"
+            else w_venv / "bin" / "python"
+        )
 
         return py_exe, env
 
@@ -65,7 +64,7 @@ class WorkerRunner:
             subprocess.run(
                 cmd,
                 check=True,
-                capture_output=False,
+                capture_output=True,  # In der Prod-Exe unterdrücken wir Konsolen-Spam
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -78,8 +77,8 @@ class WorkerRunner:
             logger.error("❌ %s in '%s'.", err, name)
             return False, err
         except subprocess.CalledProcessError as e:
-            return False, e.stderr or "Unbekannter Fehler"
-        except Exception as e:  # pylint: disable=broad-exception-caught
+            return False, e.stderr or e.stdout or "Unbekannter Fehler"
+        except Exception as e:
             err = f"Systemfehler bei '{name}': {e}"
             logger.error("❌ %s", err)
             return False, err

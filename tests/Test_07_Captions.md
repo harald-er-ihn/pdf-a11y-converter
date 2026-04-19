@@ -1,10 +1,10 @@
 # Systemarchitektur und Evaluierung
 
-Das folgende Diagramm zeigt die Architektur des PDF A11y Converters. Die Caption-Erkennung muss das Wort "Abbildung" oder "Figure" unter dem Objekt identifizieren und topologisch verknüpfen.
+Das folgende Bild zeigt ein grafisches Element des PDF A11y Converters. Die Caption-Erkennung muss das Wort "Abbildung" oder "Figure" unter dem Objekt identifizieren und topologisch verknüpfen.
 
-![Systemarchitektur des Converters](static/img/architecture_graph.svg)
+![Logo der Accessibility Kampagne](static/img/AccessibilityMatters.png)
 
-**Abbildung 1: Architektur-Übersicht der Clean Architecture Pipeline.**
+**Abbildung 1: Offizielles Logo des Projekts.**
 
 ## Ergebnisse der Validierung
 

@@ -11,7 +11,7 @@ import uuid
 from enum import Enum
 from typing import Dict, List
 
-from src.domain.geometry import bbox_area
+from src.domain.geometry import bbox_area, bbox_intersection
 from src.domain.spatial import SpatialElement
 from src.domain.spatial_constraints import SpatialConstraintSolver
 from src.domain.spatial_matching import SpatialMatcher
@@ -120,10 +120,10 @@ class LayoutGraph:
                         dist = n1.element.bbox[1] - n2.element.bbox[3]
                         if dist < 150:
                             graph.add_edge(
-                                n2.id, n1.id, EdgeType.BELOW, weight=1 / (dist + 1)
+                                n2.id, n1.id, EdgeType.BELOW, weight=1.0 / (dist + 1.0)
                             )
                             graph.add_edge(
-                                n1.id, n2.id, EdgeType.ABOVE, weight=1 / (dist + 1)
+                                n1.id, n2.id, EdgeType.ABOVE, weight=1.0 / (dist + 1.0)
                             )
 
                 # SCHRITT 4: Caption Detection
@@ -145,42 +145,44 @@ class LayoutGraph:
         if not worker_elements:
             return
 
-        w_nodes = [self.add_node(el, is_worker=True) for el in worker_elements]
-        l_nodes = [
-            n for n in self.nodes.values() if not n.is_worker and not n.is_column
-        ]
+        for w_el in worker_elements:
+            overlapping_nodes = []
+            for n in list(self.nodes.values()):
+                if n.is_column or n.is_worker:
+                    continue
 
-        # Bipartite Matching
-        matches = SpatialMatcher.match_elements(
-            [n.element for n in l_nodes], [n.element for n in w_nodes]
-        )
+                # Wir suchen jede noch so kleine Überschneidung
+                inter = bbox_intersection(n.element.bbox, w_el.bbox)
+                if inter > 0:
+                    overlapping_nodes.append(n)
 
-        for l_idx, w_idx in matches.items():
-            self.add_edge(l_nodes[l_idx].id, w_nodes[w_idx].id, EdgeType.OVERLAPS)
+            # Füge den Experten-Knoten direkt ein (Trust the Expert)
+            self.add_node(w_el, is_worker=False)
 
-        # Überlappungen auflösen
-        for w_node in w_nodes:
-            overlap_edges = [e for e in w_node.in_edges if e.type == EdgeType.OVERLAPS]
-            if overlap_edges:
-                l_node = self.nodes[overlap_edges[0].source]
-
+            for l_node in overlapping_nodes:
                 area_l = bbox_area(l_node.element.bbox)
-                area_w = bbox_area(w_node.element.bbox)
+                area_w = bbox_area(w_el.bbox)
+                inter = bbox_intersection(l_node.element.bbox, w_el.bbox)
 
-                if area_l > area_w * 1.5:
-                    sub_text = SpatialMatcher._extract_text(w_node.element)
+                # Wenn der Basis-Text viel größer ist als das Experten-Element
+                # (Marker Fallback Szenario), dann stanzen wir ein Loch hinein.
+                if area_l > area_w * 1.5 and inter > area_w * 0.3:
+                    sub_text = SpatialMatcher._extract_text(w_el)
                     split_els = SpatialConstraintSolver.insert_element_at_position(
-                        l_node.element, w_node.element, sub_text
+                        l_node.element, w_el, sub_text
                     )
-                    del self.nodes[l_node.id]
-                    for el in split_els:
-                        self.add_node(el)
-                else:
-                    l_node.element = w_node.element
+                    if l_node.id in self.nodes:
+                        del self.nodes[l_node.id]
 
-                del self.nodes[w_node.id]
-            else:
-                w_node.is_worker = False
+                    for el in split_els:
+                        # Das Worker-Element selbst überspringen (wurde schon hinzugefügt)
+                        if el.type == w_el.type and el.bbox == w_el.bbox:
+                            continue
+                        self.add_node(el, is_worker=False)
+                else:
+                    # Das Layout-Element wird vom Worker-Element überschrieben/ersetzt
+                    if l_node.id in self.nodes:
+                        del self.nodes[l_node.id]
 
     def compute_reading_order(self) -> List[SpatialElement]:
         """SCHRITT 2: Topological Reading Order (Deterministisch)."""
@@ -238,7 +240,7 @@ class LayoutGraph:
         col_nodes.sort(key=lambda c: c.element.bbox[0])
         sorted_elements = []
 
-        def _append_node_and_captions(node: LayoutNode):
+        def _append_node_and_captions(node: LayoutNode) -> None:
             if node.element.type != "caption":
                 sorted_elements.append(node.element)
                 for cap_node in caption_targets.get(node.id, []):

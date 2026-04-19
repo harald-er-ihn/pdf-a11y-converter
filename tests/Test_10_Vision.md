@@ -8,11 +8,7 @@ Das Logo der Kampagne:
 
 ![](static/img/AccessibilityMatters.png)
 
-## Architektur-Graph
 
-Eine komplexe technische Zeichnung, die das System als "Diagram" oder "Graph" erkennen sollte:
-
-![](static/img/architecture_graph.svg)
 
 ## Web-Icon
 

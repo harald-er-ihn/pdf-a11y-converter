@@ -62,45 +62,54 @@ def _rasterize_and_compress_pdf(input_pdf_path: str, temp_rasterized: str) -> No
 
 def _build_element_html(el: SpatialElement) -> str:
     """Generiert den HTML-String für ein einzelnes typisiertes Element."""
-    tag = el.type
+    tag = (el.type or "p").lower()
     bbox = el.bbox
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
+
+    # FIX 1: overflow: visible statt hidden + white-space: nowrap
+    # Verhindert, dass Formularfelder oder leicht verrutschte BBoxen
+    # den Text semantisch abschneiden (Clipping-Bug aus Test 08).
     style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
         f"width: {w_box}pt; height: {h_box}pt; color: transparent; "
-        f"font-size: 8pt; overflow: hidden;"
+        f"font-size: 8pt; white-space: nowrap; overflow: visible;"
     )
+
+    # FIX 2: Artefakte komplett ignorieren
+    # Sie sind optisch im Hintergrund vorhanden, aber belasten den Tag-Baum nicht!
+    if tag == "artifact":
+        return ""
 
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
         return f"<div style='{style}'>{html_t}</div>\n"
 
-    if tag == "list":
-        list_html = "<ul style='margin:0; padding:0; list-style-type:none;'>\n"
+    # FIX 3: Listen-Logik repariert (<ul> absolut positioniert, <li> fließend)
+    if tag in ["list", "ul"]:
+        list_html = f"<ul style='{style} margin:0; padding:0; list-style-type:none;'>\n"
         for item in el.items or []:
-            ib = item.get("bbox", [0.0, 0.0, 10.0, 10.0])
-            iw = max(ib[2] - ib[0], 10.0)
-            ih = max(ib[3] - ib[1], 10.0)
-            i_sty = (
-                f"position: absolute; left: {ib[0]}pt; "
-                f"top: {ib[1]}pt; width: {iw}pt; "
-                f"height: {ih}pt; color: transparent; "
-                f"font-size: 8pt; overflow: hidden;"
-            )
             i_txt = _auto_linkify(
                 html.escape(remove_control_characters(item.get("text", "")))
             )
-            list_html += f"<li style='{i_sty}'>{i_txt}</li>\n"
+            list_html += f"<li>{i_txt}</li>\n"
         return list_html + "</ul>\n"
 
-    if tag == "Note":
+    if tag == "note":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
         return f"<aside role='note' style='{style}'>{txt}</aside>\n"
+
+    # FIX 4: Captions richtig als <figcaption> behandeln für PDF/UA-konforme Tags
+    if tag == "caption":
+        txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
+        return f"<figcaption style='{style}'>{txt}</figcaption>\n"
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
         return f"<img src='{PIXEL}' alt='{alt_txt}' style='{style}'/>\n"
+
+    if tag == "formula":
+        tag = "p"
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:
         tag = "p"

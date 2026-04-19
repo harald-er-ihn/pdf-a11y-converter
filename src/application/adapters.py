@@ -119,11 +119,12 @@ class FormAdapter:
         for field in raw_data.get("fields", []):
             name = field.get("name", "")
             alt_text = field.get("alt_text", "")
+            bbox = field.get("bbox", [0.0, 0.0, 10.0, 10.0])
             elements.append(
                 SpatialElement(
                     type="p",
                     text=f"Feld: {name} ({alt_text})",
-                    bbox=[0.0, 0.0, 10.0, 10.0],
+                    bbox=bbox,
                 )
             )
         return elements

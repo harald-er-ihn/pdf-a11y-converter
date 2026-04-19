@@ -102,15 +102,20 @@ def _calculate_median_size(spatial_dom: SpatialDOM, page_fonts: Dict) -> float:
 
 def _smooth_heading(raw_h: int, state: HeadingState) -> int:
     """
-    Verhindert, dass das Dokument mit H3 beginnt, erlaubt aber
-    danach gewollte Sprünge und Mehrfach-H1 (PDF/UA erlaubt das).
+    Verhindert, dass das Dokument mit H3 beginnt und verbietet
+    übersprungene Ebenen (Strict numerical order für PDF/UA-1).
     """
     if not state.h1_found:
         state.h1_found = True
         state.current_h = 1
         return 1
 
-    final_h = min(max(raw_h, 1), 6)
+    # PDF/UA Regel 7.4.2: Darf nicht z.B. von H1 direkt auf H3 springen.
+    if raw_h > state.current_h + 1:
+        final_h = state.current_h + 1
+    else:
+        final_h = min(max(raw_h, 1), 6)
+
     state.current_h = final_h
     return final_h
 
@@ -212,8 +217,7 @@ def _process_page_elements(
             text, el_t, true_size, is_bold, med
         )
 
-        # 🚀 OCR-Fallback: Wenn Docling eine z.B. "2. Technische Anforderungen"
-        # übersehen hat, fangen wir das hier über Font-Weight & Länge auf!
+        # OCR-Fallback für Überschriften
         word_count = len(text.split())
         if (
             not is_heading
@@ -224,13 +228,47 @@ def _process_page_elements(
         ):
             if re.match(r"^\d+(\.\d+)*\s+[A-Z]", text):
                 is_heading = True
-                docling_h = False  # Wir zwingen es in den Typografie-Fallback
+                docling_h = False
 
         if is_heading:
             _flush_list(list_items, new_els)
             new_els.append(_process_heading(el, true_size, med, state, el_t, docling_h))
             continue
 
+        # NEU: Splitte Listen, die von Docling als ein Textblock mit \n extrahiert wurden
+        if "\n" in text and not is_heading:
+            lines = text.split("\n")
+            # FIX E741: `l` in `line` umbenannt
+            has_list_item = any(
+                _is_list_item_candidate(line.strip(), el_t, true_size, med, is_heading)
+                for line in lines
+                if line.strip()
+            )
+
+            if has_list_item:
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    line_is_heading, line_doc_h = HeadingClassifier.is_heading(
+                        line, el_t, true_size, is_bold, med
+                    )
+
+                    if _is_list_item_candidate(
+                        line, el_t, true_size, med, line_is_heading
+                    ):
+                        list_items.append(
+                            SpatialElement(type="li", bbox=el.bbox, text=line)
+                        )
+                    else:
+                        _flush_list(list_items, new_els)
+                        new_els.append(
+                            SpatialElement(type="p", bbox=el.bbox, text=line)
+                        )
+                continue
+
+        # Standard processing
         if _is_list_item_candidate(text, el_t, true_size, med, is_heading):
             el.type = "li"
             list_items.append(el)

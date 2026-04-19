@@ -67,27 +67,32 @@ def _build_element_html(el: SpatialElement) -> str:
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
 
-    # FIX 1: overflow: visible statt hidden + white-space: nowrap
-    # Verhindert, dass Formularfelder oder leicht verrutschte BBoxen
-    # den Text semantisch abschneiden (Clipping-Bug aus Test 08).
+    # overflow: visible erlaubt Darstellung von dynamischen BBoxen ohne Abschneiden
     style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
         f"width: {w_box}pt; height: {h_box}pt; color: transparent; "
         f"font-size: 8pt; white-space: nowrap; overflow: visible;"
     )
 
-    # FIX 2: Artefakte komplett ignorieren
-    # Sie sind optisch im Hintergrund vorhanden, aber belasten den Tag-Baum nicht!
     if tag == "artifact":
         return ""
 
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
-        return f"<div style='{style}'>{html_t}</div>\n"
+        # Styles direkt auf <table> anwenden, da <div>-Wrapper die Tabelle im PDF-Baum zerschießen
+        if "<table" in html_t.lower():
+            html_t = re.sub(
+                r"<table[^>]*>",
+                f'<table style="{style}">',
+                html_t,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            return html_t + "\n"
+        return f'<table style="{style}"><tr><td>{html_t}</td></tr></table>\n'
 
-    # FIX 3: Listen-Logik repariert (<ul> absolut positioniert, <li> fließend)
     if tag in ["list", "ul"]:
-        list_html = f"<ul style='{style} margin:0; padding:0; list-style-type:none;'>\n"
+        list_html = f'<ul style="{style} margin:0; padding:0; list-style-type:none;">\n'
         for item in el.items or []:
             i_txt = _auto_linkify(
                 html.escape(remove_control_characters(item.get("text", "")))
@@ -97,19 +102,20 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "note":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f"<aside role='note' style='{style}'>{txt}</aside>\n"
+        return f'<aside role="doc-footnote" style="{style}">{txt}</aside>\n'
 
-    # FIX 4: Captions richtig als <figcaption> behandeln für PDF/UA-konforme Tags
     if tag == "caption":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f"<figcaption style='{style}'>{txt}</figcaption>\n"
+        return f'<figcaption style="{style}">{txt}</figcaption>\n'
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        return f"<img src='{PIXEL}' alt='{alt_txt}' style='{style}'/>\n"
+        return f'<figure style="{style}"><img src="{PIXEL}" alt="{alt_txt}" style="width:100%; height:100%;"/></figure>\n'
 
     if tag == "formula":
-        tag = "p"
+        txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
+        style_math = style.replace("white-space: nowrap;", "white-space: normal;")
+        return f'<div role="math" style="{style_math}">{txt}</div>\n'
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:
         tag = "p"
@@ -119,7 +125,7 @@ def _build_element_html(el: SpatialElement) -> str:
         return ""
 
     clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
-    return f"<{tag} style='{style}'>{clean_txt}</{tag}>\n"
+    return f'<{tag} style="{style}">{clean_txt}</{tag}>\n'
 
 
 def _create_html_document(spatial_dom: SpatialDOM, docinfo: dict, doc_lang: str) -> str:

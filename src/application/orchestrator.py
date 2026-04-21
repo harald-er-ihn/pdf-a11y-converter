@@ -24,6 +24,9 @@ import pikepdf
 from PIL import Image
 
 from src.application.adapters import (
+    ColumnAdapter,
+    CaptionAdapter,
+    HeaderFooterAdapter,
     FootnoteAdapter,
     FormAdapter,
     FormulaAdapter,
@@ -434,7 +437,28 @@ class SemanticOrchestrator:
         # Für alle weiteren Worker: Extrahierte Seitenhöhen durchreichen
         page_heights = {page.page_num: page.height for page in spatial_dom.pages}
 
-        # Sensor Fusion Layer (Typsicher über DOMTransformer + CoordinateAdapter)
+        # 🚀 ARCHITEKTUR-FIX: Verwaiste Worker endlich ins System eingebunden
+        if "header_footer_worker" in blackboard_results:
+            c_sys = blackboard_coord_sys.get("header_footer_worker", "top_left_points")
+            artifacts = HeaderFooterAdapter.parse(
+                blackboard_results["header_footer_worker"], c_sys, page_heights
+            )
+            spatial_dom = DOMTransformer.merge_artifacts(spatial_dom, artifacts)
+
+        if "column_worker" in blackboard_results:
+            c_sys = blackboard_coord_sys.get("column_worker", "top_left_points")
+            cols = ColumnAdapter.parse(
+                blackboard_results["column_worker"], c_sys, page_heights
+            )
+            spatial_dom = DOMTransformer.merge_columns(spatial_dom, cols)
+
+        if "caption_worker" in blackboard_results:
+            c_sys = blackboard_coord_sys.get("caption_worker", "top_left_points")
+            caps = CaptionAdapter.parse(
+                blackboard_results["caption_worker"], c_sys, page_heights
+            )
+            spatial_dom = DOMTransformer.merge_captions(spatial_dom, caps)
+
         if "signature_worker" in blackboard_results:
             c_sys = blackboard_coord_sys.get("signature_worker", "top_left_points")
             sig = SignatureAdapter.parse(
@@ -461,7 +485,10 @@ class SemanticOrchestrator:
             spatial_dom = DOMTransformer.merge_footnotes(spatial_dom, fn)
 
         if "form_worker" in blackboard_results:
-            frm = FormAdapter.parse(blackboard_results["form_worker"])
+            c_sys = blackboard_coord_sys.get("form_worker", "bottom_left_points")
+            frm = FormAdapter.parse(
+                blackboard_results["form_worker"], c_sys, page_heights
+            )
             spatial_dom = DOMTransformer.merge_forms(spatial_dom, frm)
 
         images_dict = self._process_images(spatial_dom, job_dir, audit_trail)

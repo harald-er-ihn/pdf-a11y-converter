@@ -110,7 +110,7 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        return f'<figure style="{style}"><img src="{PIXEL}" alt="{alt_txt}" style="width:100%; height:100%;"/></figure>\n'
+        return f'<figure role="figure" aria-label="{alt_txt}" style="{style}"><img src="{PIXEL}" alt="{alt_txt}" style="width:100%; height:100%;"/></figure>\n'
 
     if tag == "formula":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))

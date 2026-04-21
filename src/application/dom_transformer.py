@@ -60,6 +60,18 @@ class DOMTransformer:
         return cls._validate_and_return(dom)
 
     @classmethod
+    def merge_artifacts(
+        cls, dom: SpatialDOM, artifacts: Dict[int, List[SpatialElement]]
+    ) -> SpatialDOM:
+        """Fügt Header/Footer als Artifacts typsicher in den Graphen ein."""
+        for page in dom.pages:
+            if page.page_num in artifacts:
+                page.elements = cls._inject_and_sort(
+                    page.elements, artifacts[page.page_num]
+                )
+        return cls._validate_and_return(dom)
+
+    @classmethod
     def merge_signatures(
         cls, dom: SpatialDOM, signatures: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:

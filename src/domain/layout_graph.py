@@ -156,6 +156,18 @@ class LayoutGraph:
                 if inter > 0:
                     overlapping_nodes.append(n)
 
+            # 🚀 ARCHITEKTUR-FIX: Anti-Data-Loss Vererbung
+            # Wenn der Worker (z.B. Footnote, Caption, Header) die BBox zwar erkannt hat,
+            # aber keinen Text ausspuckt, erben wir den Text deterministisch vom Layout-Node!
+            if not w_el.text and overlapping_nodes:
+                best_match = max(
+                    overlapping_nodes,
+                    key=lambda n: bbox_intersection(n.element.bbox, w_el.bbox),
+                )
+                w_el.text = best_match.element.text
+                if best_match.element.items:
+                    w_el.items = best_match.element.items
+
             # Füge den Experten-Knoten direkt ein (Trust the Expert)
             self.add_node(w_el, is_worker=False)
 

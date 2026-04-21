@@ -66,7 +66,17 @@ def _flush_list(
     """Packt angesammelte Listen-Items typsicher in ein Listen-Tag."""
     if list_items:
         dict_items = [item.model_dump() for item in list_items]
-        new_elements.append(SpatialElement(type="list", items=dict_items))
+        # Aggregierte BBox für WeasyPrint Parent-Element ermitteln
+        min_x = min(item.bbox[0] for item in list_items)
+        min_y = min(item.bbox[1] for item in list_items)
+        max_x = max(item.bbox[2] for item in list_items)
+        max_y = max(item.bbox[3] for item in list_items)
+
+        new_elements.append(
+            SpatialElement(
+                type="list", items=dict_items, bbox=[min_x, min_y, max_x, max_y]
+            )
+        )
         list_items.clear()
 
 
@@ -197,10 +207,10 @@ def _process_page_elements(
     valid_types = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li"}
 
     for el in elements:
-        el_t = el.type or "p"
+        el_t = (el.type or "p").lower()
 
         # Sensor-Fusion-Daten unangetastet durchreichen
-        if el_t.lower() not in valid_types:
+        if el_t not in valid_types:
             _flush_list(list_items, new_els)
             new_els.append(el)
             continue
@@ -235,10 +245,9 @@ def _process_page_elements(
             new_els.append(_process_heading(el, true_size, med, state, el_t, docling_h))
             continue
 
-        # NEU: Splitte Listen, die von Docling als ein Textblock mit \n extrahiert wurden
+        # Listen aufspalten, die von Docling als ein Textblock mit \n extrahiert wurden
         if "\n" in text and not is_heading:
             lines = text.split("\n")
-            # FIX E741: `l` in `line` umbenannt
             has_list_item = any(
                 _is_list_item_candidate(line.strip(), el_t, true_size, med, is_heading)
                 for line in lines
@@ -258,8 +267,11 @@ def _process_page_elements(
                     if _is_list_item_candidate(
                         line, el_t, true_size, med, line_is_heading
                     ):
+                        clean_line = re.sub(
+                            r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", "", line
+                        ).strip()
                         list_items.append(
-                            SpatialElement(type="li", bbox=el.bbox, text=line)
+                            SpatialElement(type="li", bbox=el.bbox, text=clean_line)
                         )
                     else:
                         _flush_list(list_items, new_els)
@@ -270,6 +282,10 @@ def _process_page_elements(
 
         # Standard processing
         if _is_list_item_candidate(text, el_t, true_size, med, is_heading):
+            clean_text = re.sub(
+                r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", "", text
+            ).strip()
+            el.text = clean_text
             el.type = "li"
             list_items.append(el)
             continue
@@ -312,7 +328,7 @@ def enforce_pdfua_heading_hierarchy(md_text: str) -> str:
 
 
 def enforce_pdfua_list_structure(md_text: str) -> str:
-    """Fallback für Unittests (z.B. test_repair.py). Behebt E741 Linter-Warnung."""
+    """Fallback für Unittests (z.B. test_repair.py)."""
     lines = md_text.split("\n")
     cleaned = [line for line in lines if not re.match(r"^(\d+\.|\•)\s*$", line.strip())]
     return "\n".join(cleaned)

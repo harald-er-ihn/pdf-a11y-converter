@@ -114,7 +114,13 @@ class FormAdapter:
     """Kapselt Formular-Extrakte."""
 
     @staticmethod
-    def parse(raw_data: Dict[str, Any]) -> List[SpatialElement]:
+    def parse(
+        raw_data: Dict[str, Any],
+        coord_sys: str = "bottom_left_points",
+        page_heights: Optional[Dict[int, float]] = None,
+    ) -> List[SpatialElement]:
+        page_heights = page_heights or {}
+        p_height = page_heights.get(1, 842.0)
         elements: List[SpatialElement] = []
         for field in raw_data.get("fields", []):
             name = field.get("name", "")
@@ -127,6 +133,7 @@ class FormAdapter:
                     bbox=bbox,
                 )
             )
+        CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
         return elements
 
 

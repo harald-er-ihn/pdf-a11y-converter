@@ -5,6 +5,7 @@
 Isolierter Worker für Tabellen.
 Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen
 sprachabhängig (i18n) auf, um PAC26 Fehler restlos zu beheben.
+Behebt massive Halluzinationen durch strikte Grid-Validierung.
 """
 
 import argparse
@@ -46,22 +47,31 @@ def get_column_word(lang_code: str) -> str:
 # pylint: disable=too-many-nested-blocks
 def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     """Extrahiert Tabellen streng nach PAC26 Table-Regularity Regeln."""
-    spatial_data: Dict[str, Any] = {"pages": []}
+    spatial_data: Dict[str, Any] = {"pages": list()}
     col_word = get_column_word(doc_lang)
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                tables = page.find_tables()
-                page_elements: List[Dict[str, Any]] = []
+                # PAC26 Fix: Text-Strategie findet auch rahmenlose Pandoc-Tabellen
+                tables = page.find_tables(
+                    {"vertical_strategy": "text", "horizontal_strategy": "text"}
+                )
+                page_elements: List[Dict[str, Any]] = list()
 
                 for table in tables:
                     data = table.extract()
                     if not data:
                         continue
 
-                    # 1. PAC26 Fix: Maximale Spaltenzahl ermitteln
-                    max_cols = max((len(r) for r in data), default=1)
+                    # 🚀 ARCHITEKTUR-FIX: Anti-Halluzinations-Filter
+                    # Verhindert, dass normale Textblöcke oder einspaltige Texte
+                    # als Tabellen erkannt werden und das DOM zerstören.
+                    max_cols = max((len(r) for r in data), default=0)
+                    max_rows = len(data)
+                    if max_cols < 2 or max_rows < 2:
+                        continue
+
                     bbox = [table.bbox[0], table.bbox[1], table.bbox[2], table.bbox[3]]
                     html_table = "<table style='width:100%; height:100%;'>\n"
 
@@ -131,9 +141,15 @@ def main() -> None:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-        table_count = sum(
-            len(p.get("elements", [])) for p in extracted.get("pages", [])
-        )
+        # Sicherer Workaround: Zählen der Elemente ohne Tokenizer-Crash durch Dict.get()-Defaults
+        table_count = 0
+        pages_data = extracted.get("pages")
+        if pages_data is not None:
+            for p_data in pages_data:
+                elements_data = p_data.get("elements")
+                if elements_data is not None:
+                    table_count += len(elements_data)
+
         logger.info("✅ %s Tabelle(n) erfolgreich extrahiert.", table_count)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
@@ -141,7 +157,6 @@ def main() -> None:
         sys.exit(1)
 
     finally:
-        # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=False)
 
 

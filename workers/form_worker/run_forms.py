@@ -45,7 +45,7 @@ def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
                 fvalue = str(field.get("/V", "")).strip("()")
                 alt_text = str(field.get("/TU", fname)).strip("()")
 
-                # NEU: Extrahiere exakte Bounding Box für korrekte Lesereihenfolge
+                # Extract the precise Bounding Box for reading order!
                 frect = field.get("/Rect")
                 bbox = [float(x) for x in frect] if frect else [0.0, 0.0, 10.0, 10.0]
 

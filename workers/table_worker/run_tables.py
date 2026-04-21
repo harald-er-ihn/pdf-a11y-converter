@@ -54,14 +54,16 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Hohe Toleranzen verhindern, dass Abstände 
+                # 🚀 ARCHITEKTUR-FIX: Hohe Toleranzen verhindern, dass Abstände
                 # zwischen Wörtern im Blocksatz als Tabellenspalten halluziniert werden!
-                tables = page.find_tables({
-                    "vertical_strategy": "text",
-                    "horizontal_strategy": "text",
-                    "intersection_x_tolerance": 25,
-                    "intersection_y_tolerance": 25,
-                })
+                tables = page.find_tables(
+                    {
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "intersection_x_tolerance": 25,
+                        "intersection_y_tolerance": 25,
+                    }
+                )
                 page_elements: List[Dict[str, Any]] = list()
 
                 for table in tables:

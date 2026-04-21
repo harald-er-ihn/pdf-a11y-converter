@@ -25,7 +25,9 @@ from src.repair import remove_control_characters
 logger = logging.getLogger("pdf-converter")
 
 # 1x1 Pixel Transparentes GIF (Verhindert Figure-Verlust)
-PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+PIXEL = (
+    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
+)
 
 METADATA_TYPES = {"column", "artifact", "nonstruct"}
 
@@ -60,7 +62,7 @@ def _rasterize_and_compress_pdf(input_pdf_path: str, temp_rasterized: str) -> No
 
 def _build_element_html(el: SpatialElement) -> str:
     tag = (el.type or "p").lower()
-    
+
     if tag in METADATA_TYPES:
         return ""
 
@@ -77,36 +79,47 @@ def _build_element_html(el: SpatialElement) -> str:
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
         if "<table" in html_t.lower():
-            html_t = re.sub(r"<table[^>]*>", f"<table style=\"{style}\">", html_t, count=1, flags=re.IGNORECASE)
+            html_t = re.sub(
+                r"<table[^>]*>",
+                f'<table style="{style}">',
+                html_t,
+                count=1,
+                flags=re.IGNORECASE,
+            )
             return html_t + "\n"
-        return f"<table style=\"{style}\"><tr><td>{html_t}</td></tr></table>\n"
+        return f'<table style="{style}"><tr><td>{html_t}</td></tr></table>\n'
 
     if tag in ["list", "ul"]:
-        list_html = f"<ul style=\"{style} margin:0; padding:0; list-style-type:none;\">\n"
+        list_html = f'<ul style="{style} margin:0; padding:0; list-style-type:none;">\n'
         for item in el.items or []:
-            i_txt = _auto_linkify(html.escape(remove_control_characters(item.get("text", ""))))
+            i_txt = _auto_linkify(
+                html.escape(remove_control_characters(item.get("text", "")))
+            )
             list_html += f"<li>{i_txt}</li>\n"
         return list_html + "</ul>\n"
 
     if tag == "note":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        # ARCHITEKTUR-FIX: doc-footnote wird von WeasyPrint garantiert zu <Note> gemappt
-        return f"<aside role=\"doc-footnote\" style=\"{style}\">{txt}</aside>\n"
+        # ARCHITEKTUR-FIX: doc-footnote wird von WeasyPrint zu <Note> gemappt
+        return f'<aside role="doc-footnote" style="{style}">{txt}</aside>\n'
 
     if tag == "caption":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
         # ARCHITEKTUR-FIX: figcaption wird garantiert zu <Caption> gemappt
-        return f"<figcaption style=\"{style}\">{txt}</figcaption>\n"
+        return f'<figcaption style="{style}">{txt}</figcaption>\n'
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        # ARCHITEKTUR-FIX: Nacktes <img> mit Alt-Attribut erzwingt das saubere <Figure> Tag
-        return f"<img src=\"{PIXEL}\" alt=\"{alt_txt}\" style=\"{style}\" />\n"
+        # ARCHITEKTUR-FIX: Nacktes <img> mit Alt-Attribut erzwingt <Figure>
+        return (
+            f'<figure style="{style}"><img src="{PIXEL}" alt="{alt_txt}" '
+            f'style="width:100%; height:100%;"/></figure>\n'
+        )
 
     if tag == "formula":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
         style_math = style.replace("white-space: nowrap;", "white-space: normal;")
-        return f"<div role=\"math\" style=\"{style_math}\">{txt}</div>\n"
+        return f'<div role="math" style="{style_math}">{txt}</div>\n'
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:
         tag = "p"
@@ -116,7 +129,7 @@ def _build_element_html(el: SpatialElement) -> str:
         return ""
 
     clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
-    return f"<{tag} style=\"{style}\">{clean_txt}</{tag}>\n"
+    return f'<{tag} style="{style}">{clean_txt}</{tag}>\n'
 
 
 def _create_html_document(spatial_dom: SpatialDOM, docinfo: dict, doc_lang: str) -> str:
@@ -138,22 +151,31 @@ def _create_html_document(spatial_dom: SpatialDOM, docinfo: dict, doc_lang: str)
         f"      @page {{ margin: 0; size: {doc_w}pt {doc_h}pt; }}\n"
         f"      body {{ margin: 0; padding: 0; font-family: sans-serif; }}\n"
         f"      .pdf-page {{ page-break-after: always; position: relative; }}\n"
-        f"      * {{ border: none !important; background: transparent !important; color: transparent !important; text-decoration: none !important; }}\n"
+        f"      * {{ border: none !important; background: transparent !important; "
+        f"color: transparent !important; text-decoration: none !important; }}\n"
         f"  </style>\n</head>\n<body>\n  {''.join(html_pages)}\n</body>\n</html>\n"
     )
 
 
-def _merge_pdfs(bg_path: str, weasy_path: str, out_path: str, title: str, lang: str) -> None:
+def _merge_pdfs(
+    bg_path: str, weasy_path: str, out_path: str, title: str, lang: str
+) -> None:
     with pikepdf.open(bg_path) as orig, pikepdf.open(weasy_path) as overlay:
         for i, weasy_page in enumerate(overlay.pages):
             if i < len(orig.pages):
                 orig_page = orig.pages[i]
                 weasy_page.Tabs = pikepdf.Name("/S")
-                xobj_name = weasy_page.add_resource(orig_page.as_form_xobject(), pikepdf.Name("/XObject"))
+                xobj_name = weasy_page.add_resource(
+                    orig_page.as_form_xobject(), pikepdf.Name("/XObject")
+                )
                 tr_start = overlay.make_stream(b"q 3 Tr\n")
                 tr_end = overlay.make_stream(b"\nQ\n")
-                xobj_str = overlay.make_stream(f"/Artifact <</Type /Pagination>> BDC\nq\n{xobj_name} Do\nQ\nEMC\n".encode("utf-8"))
-                
+                xobj_str = overlay.make_stream(
+                    f"/Artifact <</Type /Pagination>> BDC\nq\n{xobj_name} Do\nQ\nEMC\n".encode(
+                        "utf-8"
+                    )
+                )
+
                 old_contents = weasy_page.Contents
                 new_array = pikepdf.Array([tr_start])
                 if isinstance(old_contents, pikepdf.Array):
@@ -164,25 +186,43 @@ def _merge_pdfs(bg_path: str, weasy_path: str, out_path: str, title: str, lang: 
                 weasy_page.Contents = new_array
 
         with pikepdf.open(bg_path) as p_orig:
-            with p_orig.open_metadata(set_pikepdf_as_editor=False) as o_meta, overlay.open_metadata(set_pikepdf_as_editor=False) as n_meta:
+            with (
+                p_orig.open_metadata(set_pikepdf_as_editor=False) as o_meta,
+                overlay.open_metadata(set_pikepdf_as_editor=False) as n_meta,
+            ):
                 for k, v in o_meta.items():
                     if v is not None:
-                        try: n_meta[k] = v
-                        except: pass
+                        try:
+                            n_meta[k] = v
+                        except Exception:
+                            pass
                 n_meta["dc:title"] = title
 
         if "/ViewerPreferences" not in overlay.Root:
             overlay.Root.ViewerPreferences = pikepdf.Dictionary()
         overlay.Root.ViewerPreferences.DisplayDocTitle = pikepdf.Boolean(True)
         overlay.Root.Lang = pikepdf.String(lang)
-        overlay.save(out_path, compress_streams=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        overlay.save(
+            out_path,
+            compress_streams=True,
+            object_stream_mode=pikepdf.ObjectStreamMode.generate,
+        )
 
 
-def generate_pdf_from_spatial(spatial_dom: SpatialDOM, input_pdf_path: str, images_dict: dict, output_path: str, original_docinfo: dict, doc_lang: str) -> bool:
+def generate_pdf_from_spatial(
+    spatial_dom: SpatialDOM,
+    input_pdf_path: str,
+    images_dict: dict,
+    output_path: str,
+    original_docinfo: dict,
+    doc_lang: str,
+) -> bool:
     logger.info("🤖 Generiere unsichtbaren Layer (Semantic Overlay)...")
     full_html = _create_html_document(spatial_dom, original_docinfo, doc_lang)
     temp_weasy = str(output_path).replace(".pdf", "_temp_weasy.pdf")
-    WeasyHTML(string=full_html, base_url=os.getcwd()).write_pdf(temp_weasy, font_config=FontConfiguration(), pdf_variant="pdf/ua-1")
+    WeasyHTML(string=full_html, base_url=os.getcwd()).write_pdf(
+        temp_weasy, font_config=FontConfiguration(), pdf_variant="pdf/ua-1"
+    )
 
     bg_pdf_path = str(input_pdf_path)
     temp_raster = str(output_path).replace(".pdf", "_temp_rasterized.pdf")
@@ -191,10 +231,15 @@ def generate_pdf_from_spatial(spatial_dom: SpatialDOM, input_pdf_path: str, imag
         _rasterize_and_compress_pdf(str(input_pdf_path), temp_raster)
         bg_pdf_path = temp_raster
 
-    raw_title = str(original_docinfo.get("/Title", "")).strip("() ") or "Barrierefreies Dokument"
+    raw_title = (
+        str(original_docinfo.get("/Title", "")).strip("() ")
+        or "Barrierefreies Dokument"
+    )
     _merge_pdfs(bg_pdf_path, temp_weasy, output_path, html.escape(raw_title), doc_lang)
 
-    if os.path.exists(temp_weasy): os.remove(temp_weasy)
-    if os.path.exists(temp_raster): os.remove(temp_raster)
+    if os.path.exists(temp_weasy):
+        os.remove(temp_weasy)
+    if os.path.exists(temp_raster):
+        os.remove(temp_raster)
     logger.info("✅ Visual Fidelity Prozess komplett abgeschlossen!")
     return True

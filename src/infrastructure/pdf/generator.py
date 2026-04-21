@@ -4,7 +4,8 @@
 """
 PDF Generator Modul (Semantic Overlay Pattern).
 Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
-Arbeitet nun zu 100% mit dem typisierten SpatialDOM.
+Behebt Data-Pollution ("0"-Bug) und erzwingt strikte PDF/UA-Rollen
+zur Vermeidung von NONSTRUCT-Fragmenten im VSR.
 """
 
 import html
@@ -22,11 +23,13 @@ from src.repair import remove_control_characters
 
 logger = logging.getLogger("pdf-converter")
 
+# 1x1 Pixel Transparentes GIF (besser für WeasyPrint als PNG)
 PIXEL = (
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAA"
-    "AABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAA"
-    "SUVORK5CYII="
+    "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
 )
+
+# Diese Typen sind rein topologische Metadaten und dürfen NIEMALS im PDF/UA landen
+METADATA_TYPES = {"column", "artifact", "nonstruct"}
 
 
 def _auto_linkify(text: str) -> str:
@@ -63,6 +66,12 @@ def _rasterize_and_compress_pdf(input_pdf_path: str, temp_rasterized: str) -> No
 def _build_element_html(el: SpatialElement) -> str:
     """Generiert den HTML-String für ein einzelnes typisiertes Element."""
     tag = (el.type or "p").lower()
+
+    # 🚀 ARCHITEKTUR-FIX 1: "0"-Bug beheben.
+    # Metadaten-Knoten aus der Graph-Fusion filtern wir restlos aus.
+    if tag in METADATA_TYPES:
+        return ""
+
     bbox = el.bbox
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
@@ -74,12 +83,8 @@ def _build_element_html(el: SpatialElement) -> str:
         f"font-size: 8pt; white-space: nowrap; overflow: visible;"
     )
 
-    if tag == "artifact":
-        return ""
-
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
-        # Styles direkt auf <table> anwenden, da <div>-Wrapper die Tabelle im PDF-Baum zerschießen
         if "<table" in html_t.lower():
             html_t = re.sub(
                 r"<table[^>]*>",
@@ -102,19 +107,24 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "note":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f'<aside role="doc-footnote" style="{style}">{txt}</aside>\n'
+        # 🚀 ARCHITEKTUR-FIX 2: role="Note" erzwingt das PDF/UA <Note> Tag,
+        # was den NONSTRUCT Bug behebt.
+        return f'<div role="Note" style="{style}">{txt}</div>\n'
 
     if tag == "caption":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f'<figcaption style="{style}">{txt}</figcaption>\n'
+        return f'<div role="Caption" style="{style}">{txt}</div>\n'
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        return f'<figure role="figure" aria-label="{alt_txt}" style="{style}"><img src="{PIXEL}" alt="{alt_txt}" style="width:100%; height:100%;"/></figure>\n'
+        # 🚀 ARCHITEKTUR-FIX 3: Verschachtelung für sauberes Figure-Tagging.
+        # WeasyPrint braucht ein explizites <img> für <Figure>.
+        return f'<figure style="{style}"><img src="{PIXEL}" alt="{alt_txt}" style="width:100%; height:100%;"/></figure>\n'
 
     if tag == "formula":
         txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
         style_math = style.replace("white-space: nowrap;", "white-space: normal;")
+        # Rolle 'math' wird von WeasyPrint zu <Formula> in PDF/UA-1 konvertiert.
         return f'<div role="math" style="{style_math}">{txt}</div>\n'
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:

@@ -122,7 +122,6 @@ class SemanticOrchestrator:
         err = None
         coord_sys = "top_left_points"
 
-        # Manifest auslesen für Koordinaten-Deklaration
         manifest_file = worker.worker_dir / "manifest.json"
         if manifest_file.exists():
             try:
@@ -355,9 +354,7 @@ class SemanticOrchestrator:
         blackboard_coord_sys = {}
         map_workers = self.plugin_manager.get_map_workers()
 
-        max_workers = (
-            min(2, len(map_workers)) if map_workers else 1
-        )  # Drosselung für Windows!
+        max_workers = min(2, len(map_workers)) if map_workers else 1
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
             futures = []
@@ -434,10 +431,8 @@ class SemanticOrchestrator:
             logger.error("❌ Spatial DOM Validierung fehlgeschlagen: %s", e)
             return SpatialDOM(), {}, audit_trail
 
-        # Für alle weiteren Worker: Extrahierte Seitenhöhen durchreichen
         page_heights = {page.page_num: page.height for page in spatial_dom.pages}
 
-        # 🚀 ARCHITEKTUR-FIX: Verwaiste Worker endlich ins System eingebunden
         if "header_footer_worker" in blackboard_results:
             c_sys = blackboard_coord_sys.get("header_footer_worker", "top_left_points")
             artifacts = HeaderFooterAdapter.parse(
@@ -496,7 +491,11 @@ class SemanticOrchestrator:
             spatial_dom, images_dict, doc_lang, job_dir, audit_trail
         )
 
+        # 1. Tags anpassen (z.B. p -> h1)
         spatial_dom = repair_spatial_dom(spatial_dom, input_path)
+
+        # 2. 🚀 ARCHITEKTUR-FIX: Zusammenhängende Sätze wieder zu sauberen Absätzen mergen!
+        spatial_dom = DOMTransformer.optimize_reading_flow(spatial_dom)
 
         if logger.getEffectiveLevel() != logging.DEBUG:
             shutil.rmtree(job_dir, ignore_errors=True)

@@ -5,7 +5,7 @@
 Isolierter Worker für Tabellen.
 Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen
 sprachabhängig (i18n) auf, um PAC26 Fehler restlos zu beheben.
-Behebt massive Halluzinationen durch strikte Grid-Validierung.
+Behebt massive Halluzinationen durch strikte Grid-Validierung und "lines" Strategie.
 """
 
 import argparse
@@ -53,9 +53,14 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # PAC26 Fix: Text-Strategie findet auch rahmenlose Pandoc-Tabellen
+                # 🚀 ARCHITEKTUR-FIX: Strategie "lines" erzwingen!
+                # Verhindert, dass normale Texte mit Weißräumen zu Tabellen werden.
                 tables = page.find_tables(
-                    {"vertical_strategy": "text", "horizontal_strategy": "text"}
+                    {
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "lines",
+                        "intersection_y_tolerance": 15,
+                    }
                 )
                 page_elements: List[Dict[str, Any]] = list()
 
@@ -64,9 +69,7 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                     if not data:
                         continue
 
-                    # 🚀 ARCHITEKTUR-FIX: Anti-Halluzinations-Filter
-                    # Verhindert, dass normale Textblöcke oder einspaltige Texte
-                    # als Tabellen erkannt werden und das DOM zerstören.
+                    # Fallback Grid Check
                     max_cols = max((len(r) for r in data), default=0)
                     max_rows = len(data)
                     if max_cols < 2 or max_rows < 2:
@@ -86,7 +89,6 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                             c_txt = html.escape(c_txt.strip())
 
                             if row_idx == 0:
-                                # 🚀 PAC26 Fix: Keine leeren TH Tags!
                                 if not c_txt:
                                     c_txt = f"{col_word} {col_idx + 1}"
                                 html_table += f"<th scope='col'>{c_txt}</th>\n"
@@ -141,7 +143,6 @@ def main() -> None:
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(extracted, f, ensure_ascii=False, indent=2)
 
-        # Sicherer Workaround: Zählen der Elemente ohne Tokenizer-Crash durch Dict.get()-Defaults
         table_count = 0
         pages_data = extracted.get("pages")
         if pages_data is not None:

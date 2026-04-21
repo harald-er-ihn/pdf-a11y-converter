@@ -5,6 +5,7 @@
 DOM Transformer Layer (Sensor Fusion).
 Kapselt alle Mutationen des SpatialDOM in typsichere Operationen.
 Delegiert die Konfliktauflösung an das Layout Graph Model.
+Integriert Paragraph Aggregation.
 """
 
 import logging
@@ -26,15 +27,51 @@ class DOMTransformer:
         return SpatialDOM.model_validate(dom.model_dump())
 
     @classmethod
+    def _merge_paragraphs(cls, elements: List[SpatialElement]) -> List[SpatialElement]:
+        """🚀 ARCHITEKTUR-FIX: Fusioniert zersplitterte Textblöcke (P) zu zusammenhängenden Absätzen."""
+        if not elements:
+            return []
+
+        merged = []
+        curr = elements[0].model_copy(deep=True)
+
+        for nxt in elements[1:]:
+            # Nur gewöhnliche P-Tags mergen (H1, LI, TABLE bleiben exakt isoliert)
+            if curr.type == "p" and nxt.type == "p":
+                # Toleranz für Zeileneinrückung (x) und Zeilenumbruch-Abstand (y)
+                x_align = abs(curr.bbox[0] - nxt.bbox[0]) < 20.0
+                h_curr = max(curr.bbox[3] - curr.bbox[1], 8.0)
+                v_gap = nxt.bbox[1] - curr.bbox[3]
+
+                if x_align and -5.0 <= v_gap <= (h_curr * 2.0):
+                    curr.text = f"{curr.text or ''} {nxt.text or ''}".strip()
+                    curr.bbox = [
+                        min(curr.bbox[0], nxt.bbox[0]),
+                        min(curr.bbox[1], nxt.bbox[1]),
+                        max(curr.bbox[2], nxt.bbox[2]),
+                        max(curr.bbox[3], nxt.bbox[3]),
+                    ]
+                    continue
+
+            merged.append(curr)
+            curr = nxt.model_copy(deep=True)
+
+        merged.append(curr)
+        return merged
+
+    @classmethod
+    def optimize_reading_flow(cls, dom: SpatialDOM) -> SpatialDOM:
+        """Post-Processing: Repariert Zersplitterungen nach der Typografie-Korrektur."""
+        for page in dom.pages:
+            page.elements = cls._merge_paragraphs(page.elements)
+        return cls._validate_and_return(dom)
+
+    @classmethod
     def _inject_and_sort(
         cls,
         layout_elements: List[SpatialElement],
         worker_elements: List[SpatialElement],
     ) -> List[SpatialElement]:
-        """
-        Führt die Graph-basierte Sensor Fusion durch.
-        SpatialDOM -> LayoutGraph -> Fusion -> Sorted DOM
-        """
         graph = LayoutGraph.build_layout_graph(layout_elements)
         graph.fuse_worker_elements(worker_elements)
         return graph.compute_reading_order()
@@ -43,7 +80,6 @@ class DOMTransformer:
     def merge_columns(
         cls, dom: SpatialDOM, columns: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Reichert das DOM mit Spalten-Metadaten für die Topologie an."""
         for page in dom.pages:
             if page.page_num in columns:
                 page.elements.extend(columns[page.page_num])
@@ -53,7 +89,6 @@ class DOMTransformer:
     def merge_captions(
         cls, dom: SpatialDOM, captions: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Reichert das DOM mit Captions für die Verknüpfung an."""
         for page in dom.pages:
             if page.page_num in captions:
                 page.elements.extend(captions[page.page_num])
@@ -63,7 +98,6 @@ class DOMTransformer:
     def merge_artifacts(
         cls, dom: SpatialDOM, artifacts: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Fügt Header/Footer als Artifacts typsicher in den Graphen ein."""
         for page in dom.pages:
             if page.page_num in artifacts:
                 page.elements = cls._inject_and_sort(
@@ -75,7 +109,6 @@ class DOMTransformer:
     def merge_signatures(
         cls, dom: SpatialDOM, signatures: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Fügt Signatur-Elemente typsicher via Graph Fusion in den DOM ein."""
         for page in dom.pages:
             if page.page_num in signatures:
                 page.elements = cls._inject_and_sort(
@@ -87,7 +120,6 @@ class DOMTransformer:
     def merge_tables(
         cls, dom: SpatialDOM, table_pages: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Ersetzt Text durch Tabellen anhand von Constraint Solving & Bipartite Matching."""
         for page in dom.pages:
             if page.page_num in table_pages:
                 page.elements = cls._inject_and_sort(
@@ -99,7 +131,6 @@ class DOMTransformer:
     def merge_footnotes(
         cls, dom: SpatialDOM, footnote_pages: Dict[int, List[SpatialElement]]
     ) -> SpatialDOM:
-        """Weist Fußnoten anhand der Graphen-Topologie typsicher zu."""
         for page in dom.pages:
             if page.page_num in footnote_pages:
                 page.elements = cls._inject_and_sort(
@@ -109,7 +140,6 @@ class DOMTransformer:
 
     @classmethod
     def merge_forms(cls, dom: SpatialDOM, forms: List[SpatialElement]) -> SpatialDOM:
-        """Fügt AcroForm-Felder typsicher in die erste Seite ein und sortiert."""
         if forms and dom.pages:
             dom.pages[0].elements.extend(forms)
             graph = LayoutGraph.build_layout_graph(dom.pages[0].elements)
@@ -118,7 +148,6 @@ class DOMTransformer:
 
     @classmethod
     def merge_formulas(cls, dom: SpatialDOM, formula_md: str) -> SpatialDOM:
-        """Verwebt extrahierte LaTeX-Formeln typsicher in die Textstruktur."""
         if not formula_md:
             return dom
 

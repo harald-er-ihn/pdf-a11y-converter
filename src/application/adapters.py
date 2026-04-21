@@ -5,6 +5,7 @@
 Adapter Pattern für den Spatial DOM.
 Entkoppelt externe Worker-Strukturen vom internen Datenvertrag und
 führt die zwingende Koordinaten-Normalisierung durch.
+Behebt den Overwrite-Bug: Struktur-Tags erhalten absichtlich text=None.
 """
 
 import logging
@@ -17,8 +18,6 @@ logger = logging.getLogger("pdf-converter")
 
 
 class LayoutAdapter:
-    """Kapselt die Normalisierung von Layout-Worker-Outputs."""
-
     @staticmethod
     def normalize_docling(
         raw_data: Dict[str, Any], coord_sys: str = "top_left_points"
@@ -45,8 +44,6 @@ class LayoutAdapter:
 
 
 class TableAdapter:
-    """Kapselt die Tabellen-Extrakte."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -67,8 +64,6 @@ class TableAdapter:
 
 
 class FootnoteAdapter:
-    """Kapselt die Fußnoten-Extrakte."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -89,8 +84,6 @@ class FootnoteAdapter:
 
 
 class SignatureAdapter:
-    """Kapselt die Signatur-Extrakte."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -111,8 +104,6 @@ class SignatureAdapter:
 
 
 class FormAdapter:
-    """Kapselt Formular-Extrakte."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -127,27 +118,19 @@ class FormAdapter:
             alt_text = field.get("alt_text", "")
             bbox = field.get("bbox", [0.0, 0.0, 10.0, 10.0])
             elements.append(
-                SpatialElement(
-                    type="p",
-                    text=f"Feld: {name} ({alt_text})",
-                    bbox=bbox,
-                )
+                SpatialElement(type="p", text=f"Feld: {name} ({alt_text})", bbox=bbox)
             )
         CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
         return elements
 
 
 class FormulaAdapter:
-    """Kapselt Formel-Extrakte."""
-
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> str:
         return raw_data.get("markdown", "")
 
 
 class VisionAdapter:
-    """Kapselt Vision-Extrakte."""
-
     @staticmethod
     def parse(raw_data: Dict[str, Any]) -> Dict[str, str]:
         return {
@@ -156,8 +139,6 @@ class VisionAdapter:
 
 
 class ColumnAdapter:
-    """Kapselt Spalten-Extrakte in SpatialElements zur weiteren DOM-Fusion."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -172,16 +153,14 @@ class ColumnAdapter:
             elements = []
             for col in page.get("columns", []):
                 bbox = col.get("bbox", [0.0, 0.0, 0.0, 0.0])
-                idx = col.get("column_index", 0)
-                elements.append(SpatialElement(type="column", bbox=bbox, text=str(idx)))
+                # 🚀 FIX: text=None statt str(idx) (Verhindert "0" Bug)
+                elements.append(SpatialElement(type="column", bbox=bbox, text=None))
             CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
             result[p_num] = elements
         return result
 
 
 class HeaderFooterAdapter:
-    """Kapselt Header/Footer-Extrakte (Artifacts)."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -195,11 +174,12 @@ class HeaderFooterAdapter:
             p_height = page.get("height") or page_heights.get(p_num, 842.0)
             elements = []
             for el in page.get("elements", []):
+                # 🚀 FIX: text=None statt artifact_type (Verhindert Überschreiben)
                 elements.append(
                     SpatialElement(
                         type="artifact",
                         bbox=el.get("bbox", [0.0, 0.0, 0.0, 0.0]),
-                        text=el.get("artifact_type", "artifact"),
+                        text=None,
                     )
                 )
             CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
@@ -208,8 +188,6 @@ class HeaderFooterAdapter:
 
 
 class CaptionAdapter:
-    """Kapselt Caption-Extrakte (Beschriftungen)."""
-
     @staticmethod
     def parse(
         raw_data: Dict[str, Any],
@@ -223,12 +201,12 @@ class CaptionAdapter:
             p_height = page.get("height") or page_heights.get(p_num, 842.0)
             elements = []
             for el in page.get("elements", []):
-                c_type = el.get("caption_type", "figure")
+                # 🚀 FIX: text=None statt c_type (Vererbt Original-Text aus dem PDF)
                 elements.append(
                     SpatialElement(
                         type="caption",
                         bbox=el.get("bbox", [0.0, 0.0, 0.0, 0.0]),
-                        text=c_type,
+                        text=None,
                     )
                 )
             CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)

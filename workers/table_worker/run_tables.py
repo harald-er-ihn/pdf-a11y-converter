@@ -1,3 +1,4 @@
+# workers/table_worker/run_tables.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
@@ -5,7 +6,7 @@
 Isolierter Worker für Tabellen.
 Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen
 sprachabhängig (i18n) auf, um PAC26 Fehler restlos zu beheben.
-Behebt massive Halluzinationen durch strikte Grid-Validierung und "lines" Strategie.
+Nutzt robuste Toleranzen, um Fließtexte nicht als Tabellen zu halluzinieren.
 """
 
 import argparse
@@ -53,15 +54,14 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Strategie "lines" erzwingen!
-                # Verhindert, dass normale Texte mit Weißräumen zu Tabellen werden.
-                tables = page.find_tables(
-                    {
-                        "vertical_strategy": "text",
-                        "horizontal_strategy": "lines",
-                        "intersection_y_tolerance": 15,
-                    }
-                )
+                # 🚀 ARCHITEKTUR-FIX: Hohe Toleranzen verhindern, dass Abstände 
+                # zwischen Wörtern im Blocksatz als Tabellenspalten halluziniert werden!
+                tables = page.find_tables({
+                    "vertical_strategy": "text",
+                    "horizontal_strategy": "text",
+                    "intersection_x_tolerance": 25,
+                    "intersection_y_tolerance": 25,
+                })
                 page_elements: List[Dict[str, Any]] = list()
 
                 for table in tables:
@@ -69,7 +69,7 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                     if not data:
                         continue
 
-                    # Fallback Grid Check
+                    # Grid-Validation: Eine Tabelle muss ein Grid sein (2x2)
                     max_cols = max((len(r) for r in data), default=0)
                     max_rows = len(data)
                     if max_cols < 2 or max_rows < 2:
@@ -89,6 +89,7 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                             c_txt = html.escape(c_txt.strip())
 
                             if row_idx == 0:
+                                # 🚀 PAC26 Fix: Keine leeren TH Tags!
                                 if not c_txt:
                                     c_txt = f"{col_word} {col_idx + 1}"
                                 html_table += f"<th scope='col'>{c_txt}</th>\n"
@@ -121,7 +122,6 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
 
 
 def main() -> None:
-    """Haupteinstiegspunkt für den Table-Worker."""
     parser = argparse.ArgumentParser(description="Tabellen Experte")
     parser.add_argument("--input", required=True, help="Pfad zum PDF")
     parser.add_argument("--output", required=True, help="Ausgabe-JSON")

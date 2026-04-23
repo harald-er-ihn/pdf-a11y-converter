@@ -16,52 +16,37 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# 🚀 SYSTEM-PATH FIX für common import
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+import pdfplumber
 
 logger = setup_worker_logging("table-worker")
 configure_torch_runtime()
 
-import pdfplumber  # pylint: disable=wrong-import-position
-
 
 def get_column_word(lang_code: str) -> str:
-    """Gibt das lokalisierte Wort für 'Spalte' zurück (i18n)."""
     base_lang = lang_code.split("-")[0].lower()
-    translations = {
-        "de": "Spalte",
-        "en": "Column",
-        "es": "Columna",
-        "fr": "Colonne",
-        "it": "Colonna",
-        "nl": "Kolom",
-        "pt": "Coluna",
-        "pl": "Kolumna",
-    }
-    return translations.get(base_lang, "Column")
+    return {"de": "Spalte", "en": "Column"}.get(base_lang, "Column")
 
 
-# pylint: disable=too-many-nested-blocks
 def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
-    """Extrahiert Tabellen streng nach PAC26 Table-Regularity Regeln."""
     spatial_data: Dict[str, Any] = {"pages": list()}
     col_word = get_column_word(doc_lang)
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Hohe Toleranzen verhindern, dass Abstände
-                # zwischen Wörtern im Blocksatz als Tabellenspalten halluziniert werden!
+                # 🚀 ARCHITEKTUR-FIX: Extreme Toleranz-Drosselung.
+                # Halluziniert keine Textblöcke mehr als Tabellen!
                 tables = page.find_tables(
                     {
-                        "vertical_strategy": "text",
-                        "horizontal_strategy": "text",
-                        "intersection_x_tolerance": 25,
-                        "intersection_y_tolerance": 25,
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines",
+                        "intersection_x_tolerance": 5,
+                        "intersection_y_tolerance": 5,
                     }
                 )
                 page_elements: List[Dict[str, Any]] = list()
@@ -91,7 +76,6 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                             c_txt = html.escape(c_txt.strip())
 
                             if row_idx == 0:
-                                # 🚀 PAC26 Fix: Keine leeren TH Tags!
                                 if not c_txt:
                                     c_txt = f"{col_word} {col_idx + 1}"
                                 html_table += f"<th scope='col'>{c_txt}</th>\n"
@@ -117,7 +101,7 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                         }
                     )
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error("Fehler bei der Tabellen-Extraktion: %s", e)
 
     return spatial_data
@@ -155,7 +139,7 @@ def main() -> None:
 
         logger.info("✅ %s Tabelle(n) erfolgreich extrahiert.", table_count)
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error("❌ Fataler Fehler im Table-Worker: %s", e)
         sys.exit(1)
 

@@ -4,6 +4,8 @@
 # Lizenziert unter der GNU General Public License v3 oder später
 """
 DOM Transformer Layer (Sensor Fusion).
+Kapselt alle Mutationen des SpatialDOM in typsichere Operationen.
+Delegiert die Konfliktauflösung an das Layout Graph Model.
 """
 
 import logging
@@ -17,12 +19,16 @@ logger = logging.getLogger("pdf-converter")
 
 
 class DOMTransformer:
+    """Service zur typsicheren Manipulation und Fusion des SpatialDOM."""
+
     @classmethod
     def _validate_and_return(cls, dom: SpatialDOM) -> SpatialDOM:
+        """Sichert die Integrität nach jeder Mutation strikt ab."""
         return SpatialDOM.model_validate(dom.model_dump())
 
     @classmethod
     def _merge_paragraphs(cls, elements: List[SpatialElement]) -> List[SpatialElement]:
+        """Fusioniert zersplitterte Textblöcke (P) zu zusammenhängenden Absätzen."""
         if not elements:
             return []
 
@@ -53,8 +59,17 @@ class DOMTransformer:
 
     @classmethod
     def optimize_reading_flow(cls, dom: SpatialDOM) -> SpatialDOM:
+        """Post-Processing: Repariert Zersplitterungen nach der Typografie-Korrektur."""
         for page in dom.pages:
-            page.elements = cls._merge_paragraphs(page.elements)
+            cleaned = [
+                e
+                for e in page.elements
+                if e.type not in ["column", "artifact", "nonstruct"]
+            ]
+            for e in cleaned:
+                if e.type == "figure":
+                    e.text = ""  # Verhindert "0" Bug
+            page.elements = cls._merge_paragraphs(cleaned)
         return cls._validate_and_return(dom)
 
     @classmethod
@@ -63,6 +78,7 @@ class DOMTransformer:
         layout_elements: List[SpatialElement],
         worker_elements: List[SpatialElement],
     ) -> List[SpatialElement]:
+        """Führt die Graph-basierte Sensor Fusion durch."""
         graph = LayoutGraph.build_layout_graph(layout_elements)
         graph.fuse_worker_elements(worker_elements)
         return graph.compute_reading_order()
@@ -161,7 +177,6 @@ class DOMTransformer:
                 if el.type == "formula" or is_garbage:
                     if formula_idx < len(latex_formulas):
                         el.text = f"$$ {latex_formulas[formula_idx]} $$"
-                        # 🚀 ARCHITEKTUR-FIX: Behalte Typ "formula" bei! Verhindert Absorption durch ParagraphMerger!
                         el.type = "formula"
                         formula_idx += 1
 

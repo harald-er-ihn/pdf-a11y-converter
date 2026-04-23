@@ -1,9 +1,11 @@
+# workers/layout_worker_docling/run_docling.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Primary Worker für die Layout-Erkennung (Docling).
-Extrahiert Text, Typen (H1, P, etc.) und exakte Bounding Boxes.
+Extrahiert Text, Typen (H1, P, Table) und exakte Bounding Boxes.
+Nutzt nun Doclings volle Table-Structure-Recognition.
 """
 
 import argparse
@@ -13,7 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-# 🚀 SYSTEM-PATH FIX
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
@@ -52,7 +53,7 @@ def _setup_docling(force_ocr: bool) -> Any:
         logger.info("⚠️ FORCE-OCR: Ignoriere PDF-Textlayer und erzwinge Visual OCR.")
         try:
             options.ocr_options.force_full_page_ocr = True
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             logger.warning("OcrOptions Anpassung fehlgeschlagen: %s", e)
 
     return DocumentConverter(
@@ -68,7 +69,7 @@ def _extract_images(doc: Any, output_dir: Path) -> Dict[str, str]:
             if hasattr(picture, "get_image"):
                 try:
                     pil_img = picture.get_image(doc)
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception:
                     pass
             elif hasattr(picture, "image") and picture.image:
                 pil_img = picture.image
@@ -82,6 +83,7 @@ def _extract_images(doc: Any, output_dir: Path) -> Dict[str, str]:
 
 
 def _map_docling_type(label_name: str, level: int) -> str:
+    # 🚀 ARCHITEKTUR-FIX: Doclings exzellente Tabellen nicht mehr wegschmeißen!
     if label_name == "title" or label_name.startswith("heading"):
         return "h" + str(min(level if level > 0 else 1, 6))
     if label_name == "list_item":
@@ -90,6 +92,8 @@ def _map_docling_type(label_name: str, level: int) -> str:
         return "figure"
     if label_name == "equation":
         return "formula"
+    if label_name == "table":
+        return "table"
     return "p"
 
 
@@ -100,7 +104,6 @@ def _extract_elements(
         try:
             if not hasattr(item, "prov") or not item.prov:
                 continue
-
             prov = item.prov[0]
             if not hasattr(prov, "bbox"):
                 continue
@@ -109,19 +112,26 @@ def _extract_elements(
             p_h = page_heights.get(p_num, 842.0)
             bbox = [prov.bbox.l, p_h - prov.bbox.t, prov.bbox.r, p_h - prov.bbox.b]
 
-            text = getattr(item, "text", "")
             el_type = _map_docling_type(item.label.name, level)
+            text = getattr(item, "text", "")
+            html_val = None
 
-            if not text and el_type not in ["figure", "formula"]:
+            # 🚀 ARCHITEKTUR-FIX: Wir exportieren das perfekte Tabellen-HTML von Docling
+            if el_type == "table" and hasattr(item, "export_to_html"):
+                html_val = item.export_to_html()
+                text = ""
+
+            if not text and not html_val and el_type not in ["figure", "formula"]:
                 continue
 
             for page in spatial_dom["pages"]:
                 if page["page_num"] == p_num:
-                    page["elements"].append(
-                        {"type": el_type, "text": text, "bbox": bbox}
-                    )
+                    el_data = {"type": el_type, "text": text, "bbox": bbox}
+                    if html_val:
+                        el_data["html"] = html_val
+                    page["elements"].append(el_data)
                     break
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             logger.debug("Element übersprungen: %s", e)
 
 
@@ -129,7 +139,6 @@ def extract_spatial_data_docling(
     input_path: Path, output_dir: Path, force_ocr: bool = False
 ) -> Dict[str, Any]:
     logger.info("Starte räumliche Docling-Analyse (Spatial Data)...")
-
     converter = _setup_docling(force_ocr)
     result = converter.convert(input_path)
     doc = result.document
@@ -153,7 +162,6 @@ def extract_spatial_data_docling(
     del doc
     del result
     del converter
-
     return spatial_dom
 
 
@@ -179,8 +187,7 @@ def main() -> None:
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("✅ Layout-Extraktion (Docling) erfolgreich.")
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error("❌ Fataler Fehler in Docling: %s", e)
         write_error_contract(out_file, type(e).__name__, str(e))
         sys.exit(1)

@@ -5,7 +5,8 @@
 """
 DOM Transformer Layer (Sensor Fusion).
 Kapselt alle Mutationen des SpatialDOM in typsichere Operationen.
-Delegiert die Konfliktauflösung an das Layout Graph Model.
+Behebt PDF Fragmentierungs-Fehler (Zeilen-/Seitenumbrüche) durch
+aggressives Paragraph-Merging.
 """
 
 import logging
@@ -28,7 +29,7 @@ class DOMTransformer:
 
     @classmethod
     def _merge_paragraphs(cls, elements: List[SpatialElement]) -> List[SpatialElement]:
-        """Fusioniert zersplitterte Textblöcke (P) zu zusammenhängenden Absätzen."""
+        """Fusioniert zersplitterte Textblöcke (P) aggressiv zu sauberen Absätzen."""
         if not elements:
             return []
 
@@ -36,12 +37,15 @@ class DOMTransformer:
         curr = elements[0].model_copy(deep=True)
 
         for nxt in elements[1:]:
+            # Wir mergen nur P-Tags, um Struktur (H1, Table) nicht zu zerstören
             if curr.type == "p" and nxt.type == "p":
-                x_align = abs(curr.bbox[0] - nxt.bbox[0]) < 20.0
+                # Toleranz drastisch erhöht: Einrückungen (x_align) und große Zeilenabstände erlauben!
+                x_align = abs(curr.bbox[0] - nxt.bbox[0]) < 80.0
                 h_curr = max(curr.bbox[3] - curr.bbox[1], 8.0)
                 v_gap = nxt.bbox[1] - curr.bbox[3]
 
-                if x_align and -5.0 <= v_gap <= (h_curr * 2.0):
+                # Erlaube bis zu 4 Zeilen Abstand (z.B. nach Formeln)
+                if x_align and -20.0 <= v_gap <= (h_curr * 4.0):
                     curr.text = f"{curr.text or ''} {nxt.text or ''}".strip()
                     curr.bbox = [
                         min(curr.bbox[0], nxt.bbox[0]),
@@ -68,7 +72,9 @@ class DOMTransformer:
             ]
             for e in cleaned:
                 if e.type == "figure":
-                    e.text = ""  # Verhindert "0" Bug
+                    e.text = ""  # Verhindert "0" Bug in Tabellen-Images
+
+            # Repariere die Zersplitterung durch Docling
             page.elements = cls._merge_paragraphs(cleaned)
         return cls._validate_and_return(dom)
 
@@ -171,7 +177,6 @@ class DOMTransformer:
             for el in page.elements:
                 text = el.text or ""
 
-                # Verbesserte Erkennung von Docling Math-Blöcken (Sensor Fusion Fallback)
                 is_math = el.type in ["formula", "equation"] or (
                     el.type == "p"
                     and (

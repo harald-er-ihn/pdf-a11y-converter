@@ -3,9 +3,10 @@
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
 """
-Topological Layout Graph Model.
-Modelliert das Dokument als deterministischen Graphen, um Sensor Fusion
-und PDF/UA Lesereihenfolgen robust gegen Koordinatenfehler zu machen.
+Topological Layout Graph Model (Y-Band XY-Cut 2.0).
+Löst das PDF/UA Sequenz-Problem, indem nebeneinander liegende Elemente
+(Tabellen, Signatures, Texte) intelligent in Y-Bändern gruppiert werden,
+anstatt dumm nach der rohen Y-Achse zu sortieren.
 """
 
 import uuid
@@ -21,17 +22,11 @@ from src.domain.spatial_matching import SpatialMatcher
 class EdgeType(Enum):
     BELOW = "below"
     ABOVE = "above"
-    LEFT_OF = "left_of"
-    RIGHT_OF = "right_of"
-    INSIDE = "inside"
-    CAPTION_OF = "caption_of"
     COLUMN_OF = "column_of"
-    OVERLAPS = "overlaps"
+    CAPTION_OF = "caption_of"
 
 
 class LayoutEdge:
-    """Repräsentiert eine topologische Beziehung zwischen zwei Elementen."""
-
     def __init__(
         self, source: str, target: str, edge_type: EdgeType, weight: float = 1.0
     ):
@@ -42,8 +37,6 @@ class LayoutEdge:
 
 
 class LayoutNode:
-    """Knoten im Layout-Graphen. Kapselt das SpatialElement."""
-
     def __init__(
         self, element: SpatialElement, is_worker: bool = False, is_column: bool = False
     ):
@@ -56,8 +49,6 @@ class LayoutNode:
 
 
 class LayoutGraph:
-    """Graph-Based Sensor Fusion & Reading Order Pipeline."""
-
     def __init__(self) -> None:
         self.nodes: Dict[str, LayoutNode] = {}
 
@@ -77,10 +68,9 @@ class LayoutGraph:
 
     @classmethod
     def build_layout_graph(cls, elements: List[SpatialElement]) -> "LayoutGraph":
-        """SCHRITT 1: SpatialDOM -> LayoutGraph Konstruktion."""
         graph = cls()
-        col_nodes: List[LayoutNode] = []
-        norm_nodes: List[LayoutNode] = []
+        col_nodes = []
+        norm_nodes = []
 
         for el in elements:
             if el.type == "column":
@@ -88,9 +78,7 @@ class LayoutGraph:
             else:
                 norm_nodes.append(graph.add_node(el))
 
-        # Topologie erstellen
         for i, n1 in enumerate(norm_nodes):
-            # SCHRITT 5: Column Awareness
             if col_nodes:
                 best_col = None
                 max_overlap = 0.0
@@ -106,30 +94,16 @@ class LayoutGraph:
                 if best_col:
                     graph.add_edge(n1.id, best_col.id, EdgeType.COLUMN_OF)
 
-            # Spatial Relationships (ABOVE / BELOW / CAPTIONS)
             for j, n2 in enumerate(norm_nodes):
                 if i == j:
                     continue
-
                 x_overlap = max(
                     0.0,
                     min(n1.element.bbox[2], n2.element.bbox[2])
                     - max(n1.element.bbox[0], n2.element.bbox[0]),
                 )
 
-                if x_overlap > 0:
-                    # Y-Achsen Sequenz
-                    if n1.element.bbox[1] >= n2.element.bbox[3] - 10:
-                        dist = n1.element.bbox[1] - n2.element.bbox[3]
-                        if dist < 150:
-                            graph.add_edge(
-                                n2.id, n1.id, EdgeType.BELOW, weight=1.0 / (dist + 1.0)
-                            )
-                            graph.add_edge(
-                                n1.id, n2.id, EdgeType.ABOVE, weight=1.0 / (dist + 1.0)
-                            )
-
-                # SCHRITT 4: Caption Detection
+                # Caption Detection
                 if n1.element.type == "caption" and n2.element.type in [
                     "figure",
                     "table",
@@ -144,7 +118,6 @@ class LayoutGraph:
         return graph
 
     def fuse_worker_elements(self, worker_elements: List[SpatialElement]) -> None:
-        """SCHRITT 3: Graph-based Sensor Fusion mit Constraint Solving."""
         if not worker_elements:
             return
 
@@ -153,14 +126,10 @@ class LayoutGraph:
             for n in list(self.nodes.values()):
                 if n.is_column or n.is_worker:
                     continue
-
                 inter = bbox_intersection(n.element.bbox, w_el.bbox)
                 if inter > 0:
                     overlapping_nodes.append(n)
 
-            # ARCHITEKTUR-FIX: Anti-Data-Loss Vererbung nur durchführen,
-            # wenn das Worker-Element absolut LEER ist. Verhindert, dass
-            # Tabellen-HTML durch unsinnigen Docling-Fließtext ersetzt wird!
             is_empty_payload = not w_el.text and not w_el.html and not w_el.items
             if is_empty_payload and overlapping_nodes:
                 best_match = max(
@@ -193,6 +162,50 @@ class LayoutGraph:
                 else:
                     if l_node.id in self.nodes:
                         del self.nodes[l_node.id]
+
+    def _sort_nodes_xy_bands(self, nodes: List[LayoutNode]) -> List[LayoutNode]:
+        """
+        ARCHITEKTUR FIX: XY-Cut Algorithmus V2.0.
+        Gruppiert Knoten in horizontale Y-Bänder, um Reihenfolge-Fehler bei
+        Elementen, die nebeneinander stehen (Tabellen, Bilder), zu eliminieren.
+        """
+        if not nodes:
+            return []
+
+        # Initial von oben nach unten sortieren
+        nodes.sort(key=lambda n: n.element.bbox[1])
+
+        bands = []
+        current_band = [nodes[0]]
+
+        for n in nodes[1:]:
+            prev = current_band[-1]
+
+            # Berechne vertikale Überlappung
+            overlap = max(
+                0.0,
+                min(n.element.bbox[3], prev.element.bbox[3])
+                - max(n.element.bbox[1], prev.element.bbox[1]),
+            )
+            h1 = prev.element.bbox[3] - prev.element.bbox[1]
+            h2 = n.element.bbox[3] - n.element.bbox[1]
+
+            # Wenn sie sich vertikal signifikant überschneiden (>30%), sind sie im selben Y-Band (Zeile)
+            if overlap > 0.3 * min(h1, h2):
+                current_band.append(n)
+            else:
+                bands.append(current_band)
+                current_band = [n]
+
+        bands.append(current_band)
+
+        result = []
+        for band in bands:
+            # Innerhalb eines Bandes (Zeile) von links nach rechts sortieren
+            band.sort(key=lambda n: n.element.bbox[0])
+            result.extend(band)
+
+        return result
 
     def compute_reading_order(self) -> List[SpatialElement]:
         """SCHRITT 2: Topological Reading Order (Deterministisch)."""
@@ -264,11 +277,13 @@ class LayoutGraph:
 
         for col in col_nodes:
             items = columns_map.get(col.id, [])
-            items.sort(key=lambda n: n.element.bbox[1])
+            # ARCHITEKTUR FIX: Y-Bands anwenden
+            items = self._sort_nodes_xy_bands(items)
             for item in items:
                 _append_node_and_captions(item)
 
-        unassigned.sort(key=lambda n: n.element.bbox[1])
+        # ARCHITEKTUR FIX: Y-Bands anwenden
+        unassigned = self._sort_nodes_xy_bands(unassigned)
         for item in unassigned:
             _append_node_and_captions(item)
 

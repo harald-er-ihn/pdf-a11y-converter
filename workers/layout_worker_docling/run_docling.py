@@ -4,8 +4,9 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Primary Worker für die Layout-Erkennung (Docling).
-Extrahiert Text, Typen (H1, P, Table) und exakte Bounding Boxes.
-Nutzt nun Doclings volle Table-Structure-Recognition.
+Extrahiert Text, Typen (H1, P) und exakte Bounding Boxes.
+Tabellen werden an den Experten-Worker (pdfplumber) delegiert,
+um Data-Loss in der Sensor Fusion zu verhindern.
 """
 
 import argparse
@@ -46,7 +47,8 @@ def _setup_docling(force_ocr: bool) -> Any:
 
     options = PdfPipelineOptions()
     options.do_ocr = True
-    options.do_table_structure = True
+    # Tabellen-Struktur von Docling deaktivieren, das macht pdfplumber besser
+    options.do_table_structure = False
     options.generate_picture_images = True
 
     if force_ocr:
@@ -83,7 +85,6 @@ def _extract_images(doc: Any, output_dir: Path) -> Dict[str, str]:
 
 
 def _map_docling_type(label_name: str, level: int) -> str:
-    # 🚀 ARCHITEKTUR-FIX: Doclings exzellente Tabellen nicht mehr wegschmeißen!
     if label_name == "title" or label_name.startswith("heading"):
         return "h" + str(min(level if level > 0 else 1, 6))
     if label_name == "list_item":
@@ -92,8 +93,8 @@ def _map_docling_type(label_name: str, level: int) -> str:
         return "figure"
     if label_name == "equation":
         return "formula"
-    if label_name == "table":
-        return "table"
+    # ARCHITEKTUR-FIX: Docling darf keine Tabellen mehr exportieren.
+    # Sonst löscht der ConstraintSolver den HTML-Body, weil el.text leer ist!
     return "p"
 
 
@@ -114,21 +115,13 @@ def _extract_elements(
 
             el_type = _map_docling_type(item.label.name, level)
             text = getattr(item, "text", "")
-            html_val = None
 
-            # 🚀 ARCHITEKTUR-FIX: Wir exportieren das perfekte Tabellen-HTML von Docling
-            if el_type == "table" and hasattr(item, "export_to_html"):
-                html_val = item.export_to_html()
-                text = ""
-
-            if not text and not html_val and el_type not in ["figure", "formula"]:
+            if not text and el_type not in ["figure", "formula"]:
                 continue
 
             for page in spatial_dom["pages"]:
                 if page["page_num"] == p_num:
                     el_data = {"type": el_type, "text": text, "bbox": bbox}
-                    if html_val:
-                        el_data["html"] = html_val
                     page["elements"].append(el_data)
                     break
         except Exception as e:

@@ -53,5 +53,12 @@ for file in tests/*.pdf; do
     fi
 done
 
+# Messung der Qualität durchführen
+if python tools/measure_quality.py 2>&1 | tee -a "$LOGFILE"; then
+    echo -e "\033[1;32m✅ ERFOLG: measure_quality.py \033[0m" | tee -a "$LOGFILE"
+else
+    echo -e "\033[1;31m❌ FEHLER: measure_quality.py \033[0m" | tee -a "$LOGFILE"
+fi
+
 echo -e "\n\033[1;36m🎉 Alle Dateien abgearbeitet! Log gespeichert unter:\033[0m"
 echo "$LOGFILE"

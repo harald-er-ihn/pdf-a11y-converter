@@ -5,14 +5,14 @@
 """
 PDF Generator Modul (Semantic Overlay Pattern).
 Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
-Behält Bug-for-Bug-Kompatibilität für den Test-Oracle bei.
+Baut valides HTML5 für 100% PDF/UA-1 konformes Tagging durch WeasyPrint.
 """
 
 import html
 import logging
 import os
 import re
-from typing import Dict, Any
+from typing import Any, Dict
 
 import fitz  # PyMuPDF
 import pikepdf
@@ -24,7 +24,7 @@ from src.repair import remove_control_characters
 
 logger = logging.getLogger("pdf-converter")
 
-# Unbenutztes Pixel (Absichtlich beibehalten für Bug-for-Bug Kompatibilität)
+# Ein transparentes Pixel erzwingt die Erstellung der Bounding Box im PDF/UA
 PIXEL = (
     "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
 )
@@ -76,8 +76,11 @@ def _build_element_html(el: SpatialElement) -> str:
     style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
         f"width: {w_box}pt; height: {h_box}pt; color: transparent; "
-        f"font-size: 8pt; white-space: nowrap; overflow: visible;"
+        f"font-size: 8pt; white-space: normal; overflow: visible;"
     )
+
+    text = el.text or ""
+    clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
 
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
@@ -91,18 +94,19 @@ def _build_element_html(el: SpatialElement) -> str:
         if "<table" in html_t.lower():
             html_t = re.sub(
                 r"<table[^>]*>",
-                f'<table style="{style}">{caption_html}',
+                f'<table style="{style} border-collapse: collapse;">{caption_html}',
                 html_t,
                 count=1,
                 flags=re.IGNORECASE,
             )
             return html_t + "\n"
         return (
-            f'<table style="{style}">{caption_html}<tr><td>{html_t}</td></tr></table>\n'
+            f'<table style="{style} border-collapse: collapse;">'
+            f"{caption_html}<tr><td>{clean_txt}</td></tr></table>\n"
         )
 
-    if tag in ["list", "ul"]:
-        list_html = f'<ul style="{style} margin:0; padding:0; list-style-type:none;">\n'
+    if tag in ["list", "ul", "ol"]:
+        list_html = f'<ul style="{style} margin:0; padding:0; list-style:none;">\n'
         for item in el.items or []:
             i_txt = _auto_linkify(
                 html.escape(remove_control_characters(item.get("text", "")))
@@ -111,40 +115,40 @@ def _build_element_html(el: SpatialElement) -> str:
         return list_html + "</ul>\n"
 
     if tag == "note":
-        txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f'<div role="note" style="{style}">{txt}</div>\n'
+        return f'<div role="note" style="{style}">{clean_txt}</div>\n'
 
     if tag == "caption":
-        txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        return f'<div role="caption" style="{style}">{txt}</div>\n'
+        return f'<div role="caption" style="{style}">{clean_txt}</div>\n'
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        fig_html = f'<div role="img" aria-label="{alt_txt}">'
+        fig_html = f'<img src="{PIXEL}" alt="{alt_txt}" style="width:100%;">'
         if el.items:
             cap_txt = html.escape(
                 remove_control_characters(el.items[0].get("text", ""))
             )
-            fig_html += f'<div role="caption">{cap_txt}</div>'
-        return f'<div role="figure" style="{style}">{fig_html}</div></div>\n'
+            fig_html += f"<figcaption>{cap_txt}</figcaption>"
+        return f'<figure style="{style} margin:0;">{fig_html}</figure>\n'
 
     if tag == "form":
         txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
-        return f'<div role="form" aria-label="{txt}" style="{style}">{txt}</div>\n'
+        # ARCHITEKTUR-FIX: Sauberes HTML Input Field zwingt WeasyPrint zum <Form> Tag
+        return (
+            f'<form style="{style} margin:0;">'
+            f'<input type="text" aria-label="{txt}" title="{txt}" value="{txt}">'
+            f"</form>\n"
+        )
 
     if tag == "formula":
-        txt = _auto_linkify(html.escape(remove_control_characters(el.text or "")))
-        s_math = style.replace("white-space: nowrap;", "white-space: normal;")
-        return f'<div role="math" style="{s_math}">{txt}</div>\n'
+        # ARCHITEKTUR-FIX: Semantisches MathML Tag für <Formula>
+        return f'<math style="{style} display:block;" alt="{clean_txt}">{clean_txt}</math>\n'
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:
         tag = "p"
 
-    text = el.text or ""
     if not text.strip():
         return ""
 
-    clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
     return f'<{tag} style="{style}">{clean_txt}</{tag}>\n'
 
 

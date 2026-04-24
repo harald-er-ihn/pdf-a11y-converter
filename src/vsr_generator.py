@@ -1,3 +1,4 @@
+# src/vsr_generator.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
@@ -42,6 +43,14 @@ VSR_CSS = (
     ".bg-table { background-color: #E0DAF5; } .lbl-table { background-color: #674EA7; }\n"
     ".bg-note { background-color: #FCE5CD; } .lbl-note { background-color: #E69138; }\n"
     ".bg-figure { background-color: #FFF2CC; } .lbl-figure { background-color: #D6B656; }\n"
+    ".bg-span { background-color: #D5E8D4; } .lbl-span { background-color: #82B366; }\n"
+    ".bg-nonstruct { background-color: #E6D0DE; } "
+    ".lbl-nonstruct { background-color: #A375A1; }\n"
+    ".bg-caption { background-color: #FFF2CC; } "
+    ".lbl-caption { background-color: #D6B656; }\n"
+    ".bg-form { background-color: #DAE8FC; } .lbl-form { background-color: #6C8EBF; }\n"
+    ".bg-formula, .bg-math { background-color: #E1D5E7; } "
+    ".lbl-formula, .lbl-math { background-color: #9673A6; }\n"
     ".span-pill { background-color: #226388; color: #fff; padding: 2px 8px; "
     "border-radius: 12px; font-size: 12px; font-weight: bold; }\n"
     ".text-content { color: #222; font-size: 14px; font-family: monospace;}\n"
@@ -49,16 +58,11 @@ VSR_CSS = (
 
 
 def _get_pdf_text_blocks(pdf_path: Path) -> List[str]:
-    """
-    Extrahiert Textblöcke exakt in der Reihenfolge des PDF Content Streams.
-    Dies stellt sicher, dass die extrahierte Reihenfolge 1:1 mit den MCIDs
-    übereinstimmt und die FIFO-Starvation verhindert wird.
-    """
+    """Extrahiert Textblöcke exakt in der Reihenfolge des PDF Content Streams."""
     span_texts = []
     try:
         with fitz.open(pdf_path) as doc:
             for page in doc:
-                # sort=False ist der Schlüssel: Exakte C-Stream Reihenfolge!
                 dict_data = page.get_text("dict", sort=False)
                 for block in dict_data.get("blocks", []):
                     for line in block.get("lines", []):
@@ -88,20 +92,13 @@ def _format_content_span(txt: str) -> str:
 
 # pylint: disable=too-many-branches,too-many-return-statements
 def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
-    """
-    Rekursive Traversierung des StructTreeRoot zur HTML-Generierung.
-    WICHTIG: Text wird NUR aus der Queue gepoppt, wenn ein echtes MCID
-    vorliegt. Container oder leere Tags verbrauchen keinen Text mehr!
-    """
-    # 1. Array von Nodes (z.B. das "/K": [0] aus deinem Debug-Log)
+    """Rekursive Traversierung des StructTreeRoot zur HTML-Generierung."""
     if isinstance(node, (list, tuple, pikepdf.Array)):
         html_out = ""
         for kid in node:
             html_out += _walk_tree_html(kid, text_queue)
         return html_out
 
-    # 2. MCID (Integer Leaf Node)
-    # Pikepdf packt PDF-Zahlen in Object, Arrays/Dicts werfen TypeError bei int()
     is_mcid = False
     if isinstance(node, int):
         is_mcid = True
@@ -122,16 +119,13 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
     if not isinstance(node, pikepdf.Dictionary):
         return ""
 
-    # 3. Indirekte MCIDs (MCR Dictionary)
     if node.get("/Type") == "/MCR":
         txt = text_queue.pop(0) if text_queue else ""
         return _format_content_span(txt)
 
-    # 4. Link/Referenz Objekt (OBJR)
     if node.get("/Type") == "/OBJR":
         return _format_content_span("[Objekt/Link]")
 
-    # 5. Echter Struktur-Tag (StructElem)
     if "/S" in node:
         tag = str(node.get("/S", "UNKNOWN")).replace("/", "").upper()
         css_cls = "h" if tag.startswith("H") else tag.lower()
@@ -144,6 +138,7 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
             else:
                 alt_text = alt_obj
 
+        # ARCHITEKTUR FIX: SPAN und Inline-Formate müssen Kinder korrekt verarbeiten!
         is_container = tag in [
             "DOCUMENT",
             "DIV",
@@ -155,17 +150,26 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
             "TBODY",
             "TFOOT",
             "TR",
+            "TH",
+            "TD",
             "L",
+            "LI",
             "LBODY",
+            "UL",
+            "OL",
+            "FIGURE",
+            "FORM",
+            "NOTE",
+            "FORMULA",
+            "MATH",
+            "CAPTION",
+            "SPAN",
         ]
 
         kids_html = ""
         if "/K" in node:
             kids_html = _walk_tree_html(node.get("/K"), text_queue)
 
-        # LEER-TAG ELIMINIERUNG
-        # Wenn weder rekursiver Kind-Text noch Alt-Text existiert, Tag komplett löschen
-        # Dadurch vernichten wir WeasyPrints kilometerlange leere Tabellen.
         if not kids_html.strip() and not alt_text.strip():
             return ""
 
@@ -180,6 +184,14 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
                 "style='align-self: flex-start; border: none; "
                 f"margin-bottom: 4px;'>{tag}</div>\n"
             )
+            if alt_text:
+                esc_alt = html.escape(alt_text)
+                html_out += (
+                    "<div class='content'>"
+                    "<span class='span-pill'>Alt</span> "
+                    f"<span class='text-content'>{esc_alt}</span>"
+                    "</div>\n"
+                )
         else:
             html_out += f"<div class='block bg-{css_cls}'>\n"
             html_out += f"<div class='tag-label lbl-{css_cls}'>{tag}</div>\n"
@@ -201,16 +213,12 @@ def _walk_tree_html(node: Any, text_queue: List[str]) -> str:
 
 
 def generate_physical_vsr(pdf_path: Path, output_path: Path) -> bool:
-    """
-    Hauptmethode: Liest das physische PDF und schreibt das PAC26-HTML.
-    Wird von CLI, GUI und Tools aufgerufen (DRY Pattern).
-    """
+    """Hauptmethode: Liest das physische PDF und schreibt das PAC26-HTML."""
     if not pdf_path.exists():
         logger.error("VSR Fehler: Datei existiert nicht %s", pdf_path)
         return False
 
     try:
-        # Texte exakt linear per C++ Content Stream laden
         text_queue = _get_pdf_text_blocks(pdf_path)
 
         with pikepdf.open(pdf_path) as pdf:

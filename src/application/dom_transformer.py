@@ -59,7 +59,7 @@ class DOMTransformer:
 
     @classmethod
     def optimize_reading_flow(cls, dom: SpatialDOM) -> SpatialDOM:
-        """Post-Processing: Repariert Zersplitterungen nach der Typografie-Korrektur."""
+        """Post-Processing: Repariert Zersplitterungen nach Typografie-Korrektur."""
         for page in dom.pages:
             cleaned = [
                 e
@@ -170,11 +170,20 @@ class DOMTransformer:
         for page in dom.pages:
             for el in page.elements:
                 text = el.text or ""
-                is_garbage = len(text) < 25 and (
-                    "̂" in text or "ݏ" in text or "\\" in text
+
+                # Verbesserte Erkennung von Docling Math-Blöcken (Sensor Fusion Fallback)
+                is_math = el.type in ["formula", "equation"] or (
+                    el.type == "p"
+                    and (
+                        "\\" in text
+                        or "∑" in text
+                        or "∫" in text
+                        or text.strip().startswith("$$")
+                        or (len(text.strip()) < 25 and "̂" in text)
+                    )
                 )
 
-                if el.type == "formula" or is_garbage:
+                if is_math:
                     if formula_idx < len(latex_formulas):
                         el.text = f"$$ {latex_formulas[formula_idx]} $$"
                         el.type = "formula"

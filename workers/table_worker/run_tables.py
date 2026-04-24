@@ -39,14 +39,14 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Extreme Toleranz-Drosselung.
-                # Halluziniert keine Textblöcke mehr als Tabellen!
+                # 🚀 ARCHITEKTUR-FIX: Strategie "text" erkennt auch Tabellen ohne Linien
+                # (wie z.B. generiert von Pandoc/LaTeX Booktabs).
                 tables = page.find_tables(
                     {
-                        "vertical_strategy": "lines",
-                        "horizontal_strategy": "lines",
-                        "intersection_x_tolerance": 5,
-                        "intersection_y_tolerance": 5,
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "intersection_x_tolerance": 15,
+                        "intersection_y_tolerance": 15,
                     }
                 )
                 page_elements: List[Dict[str, Any]] = list()

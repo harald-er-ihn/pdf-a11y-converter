@@ -1,3 +1,4 @@
+# src/repair.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
@@ -66,7 +67,6 @@ def _flush_list(
     """Packt angesammelte Listen-Items typsicher in ein Listen-Tag."""
     if list_items:
         dict_items = [item.model_dump() for item in list_items]
-        # Aggregierte BBox für WeasyPrint Parent-Element ermitteln
         min_x = min(item.bbox[0] for item in list_items)
         min_y = min(item.bbox[1] for item in list_items)
         max_x = max(item.bbox[2] for item in list_items)
@@ -120,7 +120,6 @@ def _smooth_heading(raw_h: int, state: HeadingState) -> int:
         state.current_h = 1
         return 1
 
-    # PDF/UA Regel 7.4.2: Darf nicht z.B. von H1 direkt auf H3 springen.
     if raw_h > state.current_h + 1:
         final_h = state.current_h + 1
     else:
@@ -138,15 +137,11 @@ def _process_heading(
     el_type: str,
     docling_head: bool,
 ) -> SpatialElement:
-    """
-    Wandelt ein SpatialElement in eine validierte Überschrift um.
-    Priorisiert zu 100% das Docling-Label!
-    """
+    """Wandelt ein SpatialElement in eine validierte Überschrift um."""
     raw_h = 3
     if docling_head and len(el_type) > 1 and el_type[1].isdigit():
         raw_h = int(el_type[1])
     else:
-        # Fallback: Nur wenn Docling kein klares H-Label hatte, nutzen wir Typografie
         if true_size > med * 1.6:
             raw_h = 1
         elif true_size > med * 1.3:
@@ -179,16 +174,14 @@ def _get_element_metrics(
 def _is_list_item_candidate(
     text: str, el_type: str, true_size: float, med: float, is_heading: bool
 ) -> bool:
-    """
-    Prüft, ob das Element ein Listenpunkt ist.
-    Garantiert: Überschriften werden niemals zu Listen degradiert!
-    """
+    """Prüft, ob das Element ein Listenpunkt ist."""
     if is_heading or el_type.startswith("h"):
         return False
 
-    is_mark = bool(re.match(r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", text))
+    if not text:
+        return False
 
-    # Eine echte Liste sollte nicht riesig sein (verhindert False-Positives bei Titeln)
+    is_mark = bool(re.match(r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", text))
     return (el_type == "li" or is_mark) and true_size <= med * 1.15
 
 
@@ -202,14 +195,12 @@ def _process_page_elements(
     new_els: List[SpatialElement] = []
     list_items: List[SpatialElement] = []
 
-    # Nur diese Typen dürfen repariert/verändert werden!
-    # Tabellen, Formeln, Captions etc. müssen zwingend ignoriert werden.
     valid_types = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li"}
 
     for el in elements:
         el_t = (el.type or "p").lower()
 
-        # Sensor-Fusion-Daten unangetastet durchreichen
+        # ARCHITEKTUR FIX: Graph-Knoten die keine Texte sind intakt lassen!
         if el_t not in valid_types:
             _flush_list(list_items, new_els)
             new_els.append(el)
@@ -222,12 +213,10 @@ def _process_page_elements(
 
         true_size, is_bold = _get_element_metrics(el, page_fonts)
 
-        # Multi-Signal-Klassifikator
         is_heading, docling_h = HeadingClassifier.is_heading(
             text, el_t, true_size, is_bold, med
         )
 
-        # OCR-Fallback für Überschriften
         word_count = len(text.split())
         if (
             not is_heading
@@ -245,7 +234,6 @@ def _process_page_elements(
             new_els.append(_process_heading(el, true_size, med, state, el_t, docling_h))
             continue
 
-        # Listen aufspalten, die von Docling als ein Textblock mit \n extrahiert wurden
         if "\n" in text and not is_heading:
             lines = text.split("\n")
             has_list_item = any(
@@ -267,11 +255,8 @@ def _process_page_elements(
                     if _is_list_item_candidate(
                         line, el_t, true_size, med, line_is_heading
                     ):
-                        clean_line = re.sub(
-                            r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", "", line
-                        ).strip()
                         list_items.append(
-                            SpatialElement(type="li", bbox=el.bbox, text=clean_line)
+                            SpatialElement(type="li", bbox=el.bbox, text=line)
                         )
                     else:
                         _flush_list(list_items, new_els)
@@ -280,12 +265,8 @@ def _process_page_elements(
                         )
                 continue
 
-        # Standard processing
         if _is_list_item_candidate(text, el_t, true_size, med, is_heading):
-            clean_text = re.sub(
-                r"^([-*•◦▪]|\d+\.|[a-zA-Z]\)|\[\d+\])\s+", "", text
-            ).strip()
-            el.text = clean_text
+            el.text = text
             el.type = "li"
             list_items.append(el)
             continue
@@ -316,19 +297,18 @@ def repair_spatial_dom(
             page.elements, p_fonts.get(p_num, []), med_size, state
         )
 
-    # Re-Validierung, um zu garantieren, dass die Modifikationen den Contract erfüllen
     return SpatialDOM.model_validate(spatial_dom.model_dump())
 
 
 def enforce_pdfua_heading_hierarchy(md_text: str) -> str:
-    """Fallback für Unittests (z.B. test_repair.py)."""
+    """Fallback für Unittests."""
     if "###" in md_text and "#" not in md_text.split("###")[0]:
         return md_text.replace("###", "#", 1)
     return md_text
 
 
 def enforce_pdfua_list_structure(md_text: str) -> str:
-    """Fallback für Unittests (z.B. test_repair.py)."""
+    """Fallback für Unittests."""
     lines = md_text.split("\n")
     cleaned = [line for line in lines if not re.match(r"^(\d+\.|\•)\s*$", line.strip())]
     return "\n".join(cleaned)

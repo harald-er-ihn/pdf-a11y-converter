@@ -1,3 +1,4 @@
+# src/domain/layout_graph.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
@@ -31,10 +32,12 @@ class EdgeType(Enum):
 class LayoutEdge:
     """Repräsentiert eine topologische Beziehung zwischen zwei Elementen."""
 
-    def __init__(self, source: str, target: str, type: EdgeType, weight: float = 1.0):
+    def __init__(
+        self, source: str, target: str, edge_type: EdgeType, weight: float = 1.0
+    ):
         self.source = source
         self.target = target
-        self.type = type
+        self.type = edge_type
         self.weight = weight
 
 
@@ -151,24 +154,23 @@ class LayoutGraph:
                 if n.is_column or n.is_worker:
                     continue
 
-                # Wir suchen jede noch so kleine Überschneidung
                 inter = bbox_intersection(n.element.bbox, w_el.bbox)
                 if inter > 0:
                     overlapping_nodes.append(n)
 
-            # 🚀 ARCHITEKTUR-FIX: Anti-Data-Loss Vererbung
-            # Wenn der Worker (z.B. Footnote, Caption, Header) die BBox zwar erkannt hat,
-            # aber keinen Text ausspuckt, erben wir den Text deterministisch vom Layout-Node!
-            if not w_el.text and overlapping_nodes:
+            # ARCHITEKTUR-FIX: Anti-Data-Loss Vererbung nur durchführen,
+            # wenn das Worker-Element absolut LEER ist. Verhindert, dass
+            # Tabellen-HTML durch unsinnigen Docling-Fließtext ersetzt wird!
+            is_empty_payload = not w_el.text and not w_el.html and not w_el.items
+            if is_empty_payload and overlapping_nodes:
                 best_match = max(
                     overlapping_nodes,
-                    key=lambda n: bbox_intersection(n.element.bbox, w_el.bbox),
+                    key=lambda x: bbox_intersection(x.element.bbox, w_el.bbox),
                 )
                 w_el.text = best_match.element.text
                 if best_match.element.items:
                     w_el.items = best_match.element.items
 
-            # Füge den Experten-Knoten direkt ein (Trust the Expert)
             self.add_node(w_el, is_worker=False)
 
             for l_node in overlapping_nodes:
@@ -176,8 +178,6 @@ class LayoutGraph:
                 area_w = bbox_area(w_el.bbox)
                 inter = bbox_intersection(l_node.element.bbox, w_el.bbox)
 
-                # Wenn der Basis-Text viel größer ist als das Experten-Element
-                # (Marker Fallback Szenario), dann stanzen wir ein Loch hinein.
                 if area_l > area_w * 1.5 and inter > area_w * 0.3:
                     sub_text = SpatialMatcher._extract_text(w_el)
                     split_els = SpatialConstraintSolver.insert_element_at_position(
@@ -187,12 +187,10 @@ class LayoutGraph:
                         del self.nodes[l_node.id]
 
                     for el in split_els:
-                        # Das Worker-Element selbst überspringen (wurde schon hinzugefügt)
                         if el.type == w_el.type and el.bbox == w_el.bbox:
                             continue
                         self.add_node(el, is_worker=False)
                 else:
-                    # Das Layout-Element wird vom Worker-Element überschrieben/ersetzt
                     if l_node.id in self.nodes:
                         del self.nodes[l_node.id]
 
@@ -205,7 +203,6 @@ class LayoutGraph:
         ]
         col_elements = [n.element for n in self.nodes.values() if n.is_column]
 
-        # Sauberer Graph-Rebuild nach Fusion für deterministische Topologie
         final_graph = LayoutGraph()
         col_nodes = [final_graph.add_node(c, is_column=True) for c in col_elements]
         norm_nodes = [final_graph.add_node(e) for e in valid_elements]
@@ -231,7 +228,6 @@ class LayoutGraph:
             else:
                 unassigned.append(n1)
 
-        # Captions zwingend verankern
         caption_targets = {}
         for n1 in norm_nodes:
             if n1.element.type == "caption":
@@ -254,9 +250,13 @@ class LayoutGraph:
 
         def _append_node_and_captions(node: LayoutNode) -> None:
             if node.element.type != "caption":
+                caps = caption_targets.get(node.id, [])
+                if caps:
+                    if node.element.items is None:
+                        node.element.items = []
+                    for cap_node in caps:
+                        node.element.items.append({"text": cap_node.element.text})
                 sorted_elements.append(node.element)
-                for cap_node in caption_targets.get(node.id, []):
-                    sorted_elements.append(cap_node.element)
             else:
                 is_linked = any(node in caps for caps in caption_targets.values())
                 if not is_linked:

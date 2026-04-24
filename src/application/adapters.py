@@ -1,3 +1,4 @@
+# src/application/adapters.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
@@ -118,7 +119,9 @@ class FormAdapter:
             alt_text = field.get("alt_text", "")
             bbox = field.get("bbox", [0.0, 0.0, 10.0, 10.0])
             elements.append(
-                SpatialElement(type="p", text=f"Feld: {name} ({alt_text})", bbox=bbox)
+                SpatialElement(
+                    type="form", text=f"Feld: {name} ({alt_text})", bbox=bbox
+                )
             )
         CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
         return elements
@@ -153,7 +156,6 @@ class ColumnAdapter:
             elements = []
             for col in page.get("columns", []):
                 bbox = col.get("bbox", [0.0, 0.0, 0.0, 0.0])
-                # 🚀 FIX: text=None statt str(idx) (Verhindert "0" Bug)
                 elements.append(SpatialElement(type="column", bbox=bbox, text=None))
             CoordinateAdapter.normalize_elements(elements, coord_sys, p_height)
             result[p_num] = elements
@@ -174,7 +176,6 @@ class HeaderFooterAdapter:
             p_height = page.get("height") or page_heights.get(p_num, 842.0)
             elements = []
             for el in page.get("elements", []):
-                # 🚀 FIX: text=None statt artifact_type (Verhindert Überschreiben)
                 elements.append(
                     SpatialElement(
                         type="artifact",
@@ -201,7 +202,6 @@ class CaptionAdapter:
             p_height = page.get("height") or page_heights.get(p_num, 842.0)
             elements = []
             for el in page.get("elements", []):
-                # 🚀 FIX: text=None statt c_type (Vererbt Original-Text aus dem PDF)
                 elements.append(
                     SpatialElement(
                         type="caption",

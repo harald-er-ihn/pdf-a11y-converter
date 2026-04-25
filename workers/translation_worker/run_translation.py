@@ -1,9 +1,10 @@
+# workers/translation_worker/run_translation.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für KI-Übersetzungen (NLLB-200).
-Lädt das Modell zwingend und deterministisch aus dem lokalen resources-Ordner.
+100% Offline: Gibt klare Fehlermeldungen zurück, falls Modelle fehlen.
 """
 
 import argparse
@@ -24,7 +25,12 @@ if str(WORKER_ROOT) not in sys.path:
 PROJECT_ROOT = WORKER_ROOT.parent
 LOCAL_MODEL_DIR = PROJECT_ROOT / "resources" / "models" / "nllb"
 
-from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+from common import (
+    cleanup_memory,
+    configure_torch_runtime,
+    setup_worker_logging,
+    write_error_contract,
+)
 
 logger = setup_worker_logging("translation-worker")
 configure_torch_runtime()
@@ -62,6 +68,7 @@ def main() -> None:
     target_nllb = lang_map.get(target_iso, "eng_Latn")
 
     if target_nllb == "eng_Latn":
+        out_file.parent.mkdir(parents=True, exist_ok=True)
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(texts_to_translate, f, ensure_ascii=False, indent=2)
         sys.exit(0)
@@ -71,15 +78,21 @@ def main() -> None:
     )
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # ARCHITEKTUR-FIX: Actionable Error Message für 100% Offline-Betrieb
     if not LOCAL_MODEL_DIR.exists():
-        logger.error("❌ Lokales Modell fehlt: %s", LOCAL_MODEL_DIR)
+        msg = (
+            f"Lokales Modell fehlt in {LOCAL_MODEL_DIR}. "
+            "Bitte fuehre 'python tools/download_models.py' aus, "
+            "um die benoetigten Offline-Modelle herunterzuladen."
+        )
+        logger.error("❌ %s", msg)
+        write_error_contract(out_file, "ModelNotFound", msg)
         sys.exit(1)
 
     model = None
     tokenizer = None
 
     try:
-        # Laden aus exakt dem lokalen Ordner ohne Version-Check
         tokenizer = AutoTokenizer.from_pretrained(
             str(LOCAL_MODEL_DIR), src_lang="eng_Latn", local_files_only=True
         )
@@ -103,10 +116,17 @@ def main() -> None:
 
             results[key] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
 
+        out_file.parent.mkdir(parents=True, exist_ok=True)
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        if "OutOfMemoryError" in type(e).__name__:
+            write_error_contract(
+                out_file, "OutOfMemory", "Grafikkartenspeicher (VRAM) ist voll."
+            )
+        else:
+            write_error_contract(out_file, type(e).__name__, str(e))
         logger.error("❌ Fataler Fehler im Translation-Worker: %s", e)
         sys.exit(1)
     finally:

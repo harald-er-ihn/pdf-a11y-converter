@@ -1,3 +1,4 @@
+# src/domain/spatial_constraints.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Lizenziert unter der GNU General Public License v3 oder später
@@ -25,29 +26,31 @@ class SpatialConstraintSolver:
         if not base_text or not sub_text:
             return base_text, ""
 
-        # Robuster Matching-Ansatz: Toleriert OCR-Artefakte durch Block-Matching
-        # statt fragiler Regex-Muster oder striktem String-Find.
-        matcher = SequenceMatcher(None, base_text, sub_text)
-        blocks = [b for b in matcher.get_matching_blocks() if b.size > 3]
+        # FIX: Whitespace-Normalisierung für stabileres Bipartite Matching
+        base_norm = " ".join(base_text.split())
+        sub_norm = " ".join(sub_text.split())
+
+        matcher = SequenceMatcher(None, base_norm, sub_norm)
+        blocks = [b for b in matcher.get_matching_blocks() if b.size > 5]
 
         if not blocks:
             # Letzter Fallback, falls SequenceMatcher versagt
-            idx = base_text.find(sub_text[:20])
+            idx = base_norm.find(sub_norm[:20])
             if idx != -1:
-                return base_text[:idx].strip(), base_text[idx + len(sub_text) :].strip()
-            return base_text, ""
+                return base_norm[:idx].strip(), base_norm[idx + len(sub_norm) :].strip()
+            return base_norm, ""
 
         start_idx = blocks[0].a
         end_idx = blocks[-1].a + blocks[-1].size
 
         # Schutz vor extrem gestreckten Matches (z.B. wenn nur 2 Worte ganz vorne
         # und ganz hinten matchen). Nimmt dann nur den größten zusammenhängenden Block.
-        if (end_idx - start_idx) > len(sub_text) * 2.5:
+        if (end_idx - start_idx) > len(sub_norm) * 2.5:
             best_block = max(blocks, key=lambda b: b.size)
             start_idx = best_block.a
             end_idx = best_block.a + best_block.size
 
-        return base_text[:start_idx].strip(), base_text[end_idx:].strip()
+        return base_norm[:start_idx].strip(), base_norm[end_idx:].strip()
 
     @classmethod
     def insert_element_at_position(
@@ -72,7 +75,7 @@ class SpatialConstraintSolver:
                 SpatialElement(type=base_el.type, text=before_text, bbox=bbox_before)
             )
 
-        # Injiziere das neue Element (z.B. Tabelle) exakt in die Lücke
+        # Injiziere das neue Element (z.B. Tabelle, Fußnote) exakt in die Lücke
         result.append(insert_el)
 
         if after_text:

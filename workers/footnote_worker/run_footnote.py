@@ -1,3 +1,4 @@
+# workers/footnote_worker/run_footnote.py
 # PDF A11y Converter
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
@@ -14,7 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-# 🚀 SYSTEM-PATH FIX für common import
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
@@ -46,17 +46,11 @@ def _get_page_median_font_size(page: fitz.Page) -> float:
 
 
 def extract_footnotes_local(pdf_path: Path) -> Dict[str, Any]:
-    """
-    Sucht lokal nach Fußnoten.
-    Regeln:
-    1. Steht im unteren Bereich der Seite (y > 65%).
-    2. Schriftgröße ist meist kleiner als der Fließtext.
-    3. Beginnt typischerweise mit einer Zahl oder einem Symbol (1., [1], *, †).
-    """
+    """Sucht lokal nach Fußnoten."""
     spatial_data: Dict[str, Any] = {"pages": []}
 
-    # Regex für typische Fußnoten-Marker: "1. ", "[1] ", "* ", "1) "
-    footnote_pattern = re.compile(r"^(\d+[\.\)]|\[\d+\]|[\*\†\‡\§])\s")
+    # ARCHITEKTUR FIX: '?' und '\s*' fängt eng gesetzte Footnotes wie "1Vgl." ab!
+    footnote_pattern = re.compile(r"^(\d+[\.\)]?|\[\d+\]|[\*\†\‡\§])\s*")
 
     try:
         with fitz.open(pdf_path) as doc:
@@ -65,24 +59,28 @@ def extract_footnotes_local(pdf_path: Path) -> Dict[str, Any]:
                 median_size = _get_page_median_font_size(page)
                 elements = []
 
-                blocks = page.get_text("dict", sort=True).get("blocks", [])
+                blocks = page.get_text("dict", sort=False).get("blocks", [])
                 for block in blocks:
-                    if block.get("type") != 0:  # Nur Textblöcke
+                    if block.get("type") != 0:
                         continue
 
                     bbox = block["bbox"]
-                    # Regel 1: Unteres Drittel/Viertel der Seite
                     if bbox[1] < page_height * 0.65:
                         continue
 
-                    # Text und durchschnittliche Größe des Blocks sammeln
                     block_text = ""
                     block_sizes = []
+
                     for line in block.get("lines", []):
+                        # FIX: Spans direkt joinen für sauberes OCR Matching
+                        line_text = "".join(
+                            span.get("text", "") for span in line.get("spans", [])
+                        )
+                        if line_text.strip():
+                            block_text += line_text.strip() + " "
+
                         for span in line.get("spans", []):
-                            txt = span.get("text", "")
-                            if txt.strip():
-                                block_text += txt + " "
+                            if span.get("text", "").strip():
                                 block_sizes.append(span.get("size", 10.0))
 
                     block_text = block_text.strip()
@@ -91,16 +89,15 @@ def extract_footnotes_local(pdf_path: Path) -> Dict[str, Any]:
 
                     avg_size = sum(block_sizes) / len(block_sizes)
 
-                    # Regel 2 & 3: Kleinere Schrift ODER passendes Prefix-Muster
                     is_smaller = avg_size < (median_size * 0.95)
                     matches_pattern = bool(footnote_pattern.match(block_text))
 
-                    # Wenn es wie eine Fußnote aussieht, markieren wir es!
                     if matches_pattern or (is_smaller and len(block_text) > 5):
                         elements.append(
                             {
                                 "page_num": page_num,
-                                "type": "Note",
+                                "type": "note",
+                                "text": block_text,
                                 "bbox": list(bbox),
                             }
                         )
@@ -113,7 +110,7 @@ def extract_footnotes_local(pdf_path: Path) -> Dict[str, Any]:
                         }
                     )
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception as e:
         logger.error("Fehler bei der lokalen Fußnoten-Extraktion: %s", e)
         raise
 
@@ -121,7 +118,6 @@ def extract_footnotes_local(pdf_path: Path) -> Dict[str, Any]:
 
 
 def main() -> None:
-    """Haupteinstiegspunkt für den lokalen Footnote-Worker."""
     parser = argparse.ArgumentParser(description="Fußnoten Experte (Local/PyMuPDF)")
     parser.add_argument("--input", required=True, help="Pfad zum Eingabe-PDF")
     parser.add_argument("--output", required=True, help="Pfad zur Ausgabe-JSON")

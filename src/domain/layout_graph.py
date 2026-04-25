@@ -103,7 +103,6 @@ class LayoutGraph:
                     - max(n1.element.bbox[0], n2.element.bbox[0]),
                 )
 
-                # Caption Detection
                 if n1.element.type == "caption" and n2.element.type in [
                     "figure",
                     "table",
@@ -118,6 +117,7 @@ class LayoutGraph:
         return graph
 
     def fuse_worker_elements(self, worker_elements: List[SpatialElement]) -> None:
+        """Architektur-Fix: Ignoriert winzige BBox-Kollisionen (verhindert Löschung von Fließtext)."""
         if not worker_elements:
             return
 
@@ -130,49 +130,61 @@ class LayoutGraph:
                 if inter > 0:
                     overlapping_nodes.append(n)
 
-            is_empty_payload = not w_el.text and not w_el.html and not w_el.items
-            if is_empty_payload and overlapping_nodes:
-                best_match = max(
+            is_empty = not w_el.text and not w_el.html and not w_el.items
+            if is_empty and overlapping_nodes:
+                best_m = max(
                     overlapping_nodes,
                     key=lambda x: bbox_intersection(x.element.bbox, w_el.bbox),
                 )
-                w_el.text = best_match.element.text
-                if best_match.element.items:
-                    w_el.items = best_match.element.items
+                w_el.text = best_m.element.text
+                if best_m.element.items:
+                    w_el.items = best_m.element.items
 
-            self.add_node(w_el, is_worker=False)
+            w_el_added = False
+
+            if not overlapping_nodes:
+                self.add_node(w_el, is_worker=True)
+                continue
 
             for l_node in overlapping_nodes:
                 area_l = bbox_area(l_node.element.bbox)
                 area_w = bbox_area(w_el.bbox)
                 inter = bbox_intersection(l_node.element.bbox, w_el.bbox)
 
+                # FIX: Verhindert, dass Footnotes den kompletten Haupttext löschen!
+                # Wenn die Überschneidung kleiner als 10% der Fläche ist -> ignorieren.
+                if inter < area_w * 0.1 and inter < area_l * 0.1:
+                    continue
+
                 if area_l > area_w * 1.5 and inter > area_w * 0.3:
                     sub_text = SpatialMatcher._extract_text(w_el)
                     split_els = SpatialConstraintSolver.insert_element_at_position(
                         l_node.element, w_el, sub_text
                     )
+
                     if l_node.id in self.nodes:
                         del self.nodes[l_node.id]
 
                     for el in split_els:
-                        if el.type == w_el.type and el.bbox == w_el.bbox:
-                            continue
-                        self.add_node(el, is_worker=False)
-                else:
+                        is_w = el.type == w_el.type and el.bbox == w_el.bbox
+                        self.add_node(el, is_worker=is_w)
+                        if is_w:
+                            w_el_added = True
+                elif inter > area_l * 0.5 or inter > area_w * 0.5:
                     if l_node.id in self.nodes:
                         del self.nodes[l_node.id]
 
+                        if not w_el_added:
+                            self.add_node(w_el, is_worker=True)
+                            w_el_added = True
+
+            if not w_el_added:
+                self.add_node(w_el, is_worker=True)
+
     def _sort_nodes_xy_bands(self, nodes: List[LayoutNode]) -> List[LayoutNode]:
-        """
-        ARCHITEKTUR FIX: XY-Cut Algorithmus V2.0.
-        Gruppiert Knoten in horizontale Y-Bänder, um Reihenfolge-Fehler bei
-        Elementen, die nebeneinander stehen (Tabellen, Bilder), zu eliminieren.
-        """
         if not nodes:
             return []
 
-        # Initial von oben nach unten sortieren
         nodes.sort(key=lambda n: n.element.bbox[1])
 
         bands = []
@@ -180,8 +192,6 @@ class LayoutGraph:
 
         for n in nodes[1:]:
             prev = current_band[-1]
-
-            # Berechne vertikale Überlappung
             overlap = max(
                 0.0,
                 min(n.element.bbox[3], prev.element.bbox[3])
@@ -190,7 +200,6 @@ class LayoutGraph:
             h1 = prev.element.bbox[3] - prev.element.bbox[1]
             h2 = n.element.bbox[3] - n.element.bbox[1]
 
-            # Wenn sie sich vertikal signifikant überschneiden (>30%), sind sie im selben Y-Band (Zeile)
             if overlap > 0.3 * min(h1, h2):
                 current_band.append(n)
             else:
@@ -201,19 +210,13 @@ class LayoutGraph:
 
         result = []
         for band in bands:
-            # Innerhalb eines Bandes (Zeile) von links nach rechts sortieren
             band.sort(key=lambda n: n.element.bbox[0])
             result.extend(band)
 
         return result
 
     def compute_reading_order(self) -> List[SpatialElement]:
-        """SCHRITT 2: Topological Reading Order (Deterministisch)."""
-        valid_elements = [
-            n.element
-            for n in self.nodes.values()
-            if not n.is_column and not n.is_worker
-        ]
+        valid_elements = [n.element for n in self.nodes.values() if not n.is_column]
         col_elements = [n.element for n in self.nodes.values() if n.is_column]
 
         final_graph = LayoutGraph()
@@ -277,12 +280,10 @@ class LayoutGraph:
 
         for col in col_nodes:
             items = columns_map.get(col.id, [])
-            # ARCHITEKTUR FIX: Y-Bands anwenden
             items = self._sort_nodes_xy_bands(items)
             for item in items:
                 _append_node_and_captions(item)
 
-        # ARCHITEKTUR FIX: Y-Bands anwenden
         unassigned = self._sort_nodes_xy_bands(unassigned)
         for item in unassigned:
             _append_node_and_captions(item)

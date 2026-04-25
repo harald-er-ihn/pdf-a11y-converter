@@ -6,6 +6,7 @@
 PDF Generator Modul (Semantic Overlay Pattern).
 Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
 Baut valides HTML5 für 100% PDF/UA-1 konformes Tagging durch WeasyPrint.
+Behebt den NonStruct-Bug durch striktes Wrapper-Pattern für absolute Koordinaten.
 """
 
 import html
@@ -24,7 +25,6 @@ from src.repair import remove_control_characters
 
 logger = logging.getLogger("pdf-converter")
 
-# Ein transparentes Pixel erzwingt die Erstellung der Bounding Box im PDF/UA
 PIXEL = (
     "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
 )
@@ -63,7 +63,7 @@ def _rasterize_and_compress_pdf(input_pdf: str, temp_out: str) -> None:
 
 
 def _build_element_html(el: SpatialElement) -> str:
-    """Konstruiert das HTML-Element unter Erhalt spezifischer Artefakte."""
+    """Konstruiert das HTML-Element mit dem Wrapper-Pattern für den Document Flow."""
     tag = (el.type or "p").lower()
 
     if tag in METADATA_TYPES:
@@ -73,10 +73,14 @@ def _build_element_html(el: SpatialElement) -> str:
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
 
-    style = (
+    # 🚀 ARCHITEKTUR-FIX: Der Wrapper übernimmt die absolute Positionierung.
+    c_style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
-        f"width: {w_box}pt; height: {h_box}pt; color: transparent; "
-        f"font-size: 8pt; white-space: normal; overflow: visible;"
+        f"width: {w_box}pt; height: {h_box}pt; overflow: visible;"
+    )
+    i_style = (
+        "margin: 0; padding: 0; color: transparent; "
+        "font-size: 8pt; white-space: normal;"
     )
 
     text = el.text or ""
@@ -86,76 +90,85 @@ def _build_element_html(el: SpatialElement) -> str:
         html_t = remove_control_characters(el.html or "")
         caption_html = ""
         if el.items:
-            cap_txt = html.escape(
-                remove_control_characters(el.items[0].get("text", ""))
-            )
+            raw_cap = el.items[0].get("text") or ""
+            cap_txt = html.escape(remove_control_characters(raw_cap))
             caption_html = f"<caption>{cap_txt}</caption>"
 
         if "<table" in html_t.lower():
             html_t = re.sub(
                 r"<table[^>]*>",
-                f'<table style="{style} border-collapse: collapse;">{caption_html}',
+                f'<table style="{i_style} border-collapse: collapse;">{caption_html}',
                 html_t,
                 count=1,
                 flags=re.IGNORECASE,
             )
-            return html_t + "\n"
+            return f'<div style="{c_style}">{html_t}</div>\n'
         return (
-            f'<table style="{style} border-collapse: collapse;">'
-            f"{caption_html}<tr><td>{clean_txt}</td></tr></table>\n"
+            f'<div style="{c_style}">'
+            f'<table style="{i_style} border-collapse: collapse;">'
+            f"{caption_html}<tr><td>{clean_txt}</td></tr></table></div>\n"
         )
 
     if tag in ["list", "ul", "ol"]:
-        list_html = f'<ul style="{style} margin:0; padding:0; list-style:none;">\n'
+        list_html = f'<ul style="{i_style} list-style:none;">\n'
         for item in el.items or []:
-            i_txt = _auto_linkify(
-                html.escape(remove_control_characters(item.get("text", "")))
-            )
+            raw_i = item.get("text") or ""
+            i_txt = _auto_linkify(html.escape(remove_control_characters(raw_i)))
             list_html += f"<li>{i_txt}</li>\n"
-        return list_html + "</ul>\n"
+        list_html += "</ul>\n"
+        return f'<div style="{c_style}">{list_html}</div>\n'
 
     if tag == "note":
-        return f'<div role="note" style="{style}">{clean_txt}</div>\n'
+        return (
+            f'<div style="{c_style}"><aside style="{i_style}">'
+            f"{clean_txt}</aside></div>\n"
+        )
 
     if tag == "caption":
-        return f'<div role="caption" style="{style}">{clean_txt}</div>\n'
+        return (
+            f'<div style="{c_style}"><div role="caption" style="{i_style}">'
+            f"{clean_txt}</div></div>\n"
+        )
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        fig_html = f'<img src="{PIXEL}" alt="{alt_txt}" style="width:100%;">'
+        # FIX: Pures <img> Tag generiert garantiert /Figure in der PDF.
+        fig_html = f'<img src="{PIXEL}" alt="{alt_txt}" style="{i_style} width:100%; height:100%;">'
         if el.items:
-            cap_txt = html.escape(
-                remove_control_characters(el.items[0].get("text", ""))
-            )
-            fig_html += f"<figcaption>{cap_txt}</figcaption>"
-        return f'<figure style="{style} margin:0;">{fig_html}</figure>\n'
+            raw_cap = el.items[0].get("text") or ""
+            cap_txt = html.escape(remove_control_characters(raw_cap))
+            fig_html += f'<p style="{i_style}">{cap_txt}</p>'
+        return f'<div style="{c_style}">{fig_html}</div>\n'
 
     if tag == "form":
         txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
-        # ARCHITEKTUR-FIX: Sauberes HTML Input Field zwingt WeasyPrint zum <Form> Tag
+        # FIX: Explizites <form> zwingt WeasyPrint zum /Form Tag.
         return (
-            f'<form style="{style} margin:0;">'
-            f'<input type="text" aria-label="{txt}" title="{txt}" value="{txt}">'
-            f"</form>\n"
+            f'<div style="{c_style}"><form style="{i_style}" aria-label="{txt}">'
+            f"<p>{txt}</p></form></div>\n"
         )
 
     if tag == "formula":
-        # ARCHITEKTUR-FIX: Semantisches MathML Tag für <Formula>
-        return f'<math style="{style} display:block;" alt="{clean_txt}">{clean_txt}</math>\n'
+        # FIX: <p role="math"> ist robust für PDF/UA
+        return (
+            f'<div style="{c_style}"><p role="math" aria-label="Formel" '
+            f'style="{i_style}">{clean_txt}</p></div>\n'
+        )
 
-    if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "div"]:
+    if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote"]:
         tag = "p"
 
     if not text.strip():
         return ""
 
-    return f'<{tag} style="{style}">{clean_txt}</{tag}>\n'
+    return (
+        f'<div style="{c_style}"><{tag} style="{i_style}">{clean_txt}</{tag}></div>\n'
+    )
 
 
 def _create_html_document(
     spatial_dom: SpatialDOM, docinfo: Dict[str, Any], doc_lang: str
 ) -> str:
-    """Baut das unsichtbare HTML5 Grid auf."""
     html_pages = []
     for page in spatial_dom.pages:
         w, h = page.width, page.height
@@ -183,7 +196,6 @@ def _create_html_document(
 def _merge_pdfs(
     bg_path: str, weasy_path: str, out_path: str, title: str, lang: str
 ) -> None:
-    """Kombiniert visuelle Ebene (Original) und semantische Ebene (Weasy)."""
     with pikepdf.open(bg_path) as orig, pikepdf.open(weasy_path) as overlay:
         for i, weasy_page in enumerate(overlay.pages):
             if i < len(orig.pages):
@@ -240,7 +252,6 @@ def generate_pdf_from_spatial(
     original_docinfo: dict,
     doc_lang: str,
 ) -> bool:
-    """Haupt-Facade für den Generator-Prozess."""
     logger.info("🤖 Generiere unsichtbaren Layer (Semantic Overlay)...")
     full_html = _create_html_document(spatial_dom, original_docinfo, doc_lang)
     temp_weasy = str(output_path).replace(".pdf", "_temp_weasy.pdf")

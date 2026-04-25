@@ -37,14 +37,11 @@ class DOMTransformer:
         curr = elements[0].model_copy(deep=True)
 
         for nxt in elements[1:]:
-            # Wir mergen nur P-Tags, um Struktur (H1, Table) nicht zu zerstören
             if curr.type == "p" and nxt.type == "p":
-                # Toleranz drastisch erhöht: Einrückungen (x_align) und große Zeilenabstände erlauben!
                 x_align = abs(curr.bbox[0] - nxt.bbox[0]) < 80.0
                 h_curr = max(curr.bbox[3] - curr.bbox[1], 8.0)
                 v_gap = nxt.bbox[1] - curr.bbox[3]
 
-                # Erlaube bis zu 4 Zeilen Abstand (z.B. nach Formeln)
                 if x_align and -20.0 <= v_gap <= (h_curr * 4.0):
                     curr.text = f"{curr.text or ''} {nxt.text or ''}".strip()
                     curr.bbox = [
@@ -72,9 +69,8 @@ class DOMTransformer:
             ]
             for e in cleaned:
                 if e.type == "figure":
-                    e.text = ""  # Verhindert "0" Bug in Tabellen-Images
+                    e.text = ""
 
-            # Repariere die Zersplitterung durch Docling
             page.elements = cls._merge_paragraphs(cleaned)
         return cls._validate_and_return(dom)
 
@@ -84,7 +80,6 @@ class DOMTransformer:
         layout_elements: List[SpatialElement],
         worker_elements: List[SpatialElement],
     ) -> List[SpatialElement]:
-        """Führt die Graph-basierte Sensor Fusion durch."""
         graph = LayoutGraph.build_layout_graph(layout_elements)
         graph.fuse_worker_elements(worker_elements)
         return graph.compute_reading_order()
@@ -161,6 +156,7 @@ class DOMTransformer:
 
     @classmethod
     def merge_formulas(cls, dom: SpatialDOM, formula_md: str) -> SpatialDOM:
+        """Architektur-Fix: Cluster-basiertes BBox-Merging für defragmentierte Formeln."""
         if not formula_md:
             return dom
 
@@ -174,9 +170,15 @@ class DOMTransformer:
 
         formula_idx = 0
         for page in dom.pages:
-            for el in page.elements:
-                text = el.text or ""
+            new_elements = []
+            skip_until = 0
 
+            for i, el in enumerate(page.elements):
+                if i < skip_until:
+                    continue
+
+                text = el.text or ""
+                # FIX: Verhindert, dass normale Sätze als Formeln geschluckt werden.
                 is_math = el.type in ["formula", "equation"] or (
                     el.type == "p"
                     and (
@@ -184,14 +186,58 @@ class DOMTransformer:
                         or "∑" in text
                         or "∫" in text
                         or text.strip().startswith("$$")
-                        or (len(text.strip()) < 25 and "̂" in text)
+                        or (
+                            len(text.strip()) < 25
+                            and any(c in text for c in "=+-\\/()[]{}<>^~")
+                        )
                     )
                 )
 
-                if is_math:
-                    if formula_idx < len(latex_formulas):
-                        el.text = f"$$ {latex_formulas[formula_idx]} $$"
-                        el.type = "formula"
-                        formula_idx += 1
+                if is_math and formula_idx < len(latex_formulas):
+                    merged_bbox = list(el.bbox)
+                    j = i + 1
+
+                    while j < len(page.elements):
+                        nxt = page.elements[j]
+                        nxt_text = nxt.text or ""
+                        nxt_is_math = nxt.type in ["formula", "equation"] or (
+                            nxt.type == "p"
+                            and (
+                                "\\" in nxt_text
+                                or "∑" in nxt_text
+                                or "∫" in nxt_text
+                                or nxt_text.strip().startswith("$$")
+                                or (
+                                    len(nxt_text.strip()) < 25
+                                    and any(c in nxt_text for c in "=+-\\/()[]{}<>^~")
+                                )
+                            )
+                        )
+                        v_gap = nxt.bbox[1] - merged_bbox[3]
+
+                        if v_gap < 50.0 and nxt_is_math:
+                            merged_bbox = [
+                                min(merged_bbox[0], nxt.bbox[0]),
+                                min(merged_bbox[1], nxt.bbox[1]),
+                                max(merged_bbox[2], nxt.bbox[2]),
+                                max(merged_bbox[3], nxt.bbox[3]),
+                            ]
+                            j += 1
+                        else:
+                            break
+
+                    new_elements.append(
+                        SpatialElement(
+                            type="formula",
+                            text=f"$$ {latex_formulas[formula_idx]} $$",
+                            bbox=merged_bbox,
+                        )
+                    )
+                    skip_until = j
+                    formula_idx += 1
+                else:
+                    new_elements.append(el)
+
+            page.elements = new_elements
 
         return cls._validate_and_return(dom)

@@ -1,9 +1,10 @@
+# workers/vision_worker/run_vision.py
 # PDF A11y Converter - Vision Worker
 # Copyright (C) 2026 Dr. Harald Hutter
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für die Bildbeschreibung (BLIP).
-Lädt das Modell zwingend und deterministisch aus dem lokalen resources-Ordner.
+100% Offline: Gibt klare Fehlermeldungen zurück, falls Modelle fehlen.
 """
 
 import argparse
@@ -12,16 +13,14 @@ import os
 import sys
 from pathlib import Path
 
-# 🚀 OFFLINE-MODE ERZWINGEN (Muss VOR den Imports von torch/transformers passieren)
+# 🚀 OFFLINE-MODE ERZWINGEN
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-# SYSTEM-PATH FIX
 WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-# Dynamische, sichere Pfadauflösung (funktioniert lokal und in der compilierten .exe)
 PROJECT_ROOT = WORKER_ROOT.parent
 LOCAL_MODEL_DIR = PROJECT_ROOT / "resources" / "models" / "blip"
 
@@ -59,8 +58,13 @@ def main() -> None:
     logger.info("🤖 Lade Vision-Experten (BLIP) lokal aus: %s", LOCAL_MODEL_DIR.name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # ARCHITEKTUR-FIX: Actionable Error Message für 100% Offline-Betrieb
     if not LOCAL_MODEL_DIR.exists():
-        msg = f"Lokales Modell fehlt in {LOCAL_MODEL_DIR}"
+        msg = (
+            f"Lokales Modell fehlt in {LOCAL_MODEL_DIR}. "
+            "Bitte fuehre 'python tools/download_models.py' aus, "
+            "um die benoetigten Offline-Modelle herunterzuladen."
+        )
         logger.error("❌ %s", msg)
         write_error_contract(output_json, "ModelNotFound", msg)
         sys.exit(1)
@@ -69,7 +73,6 @@ def main() -> None:
     processor = None
 
     try:
-        # local_files_only=True verbietet HuggingFace selbst den Versions-Check
         processor = BlipProcessor.from_pretrained(
             str(LOCAL_MODEL_DIR), local_files_only=True
         )

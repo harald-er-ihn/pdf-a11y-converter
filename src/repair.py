@@ -29,9 +29,11 @@ class HeadingState:
         self.h1_found = False
 
 
-def remove_control_characters(md_text: str) -> str:
-    """Sanitization Pattern: Entfernt unsichtbare ASCII-Kontrollzeichen."""
-    text = unicodedata.normalize("NFC", md_text)
+def remove_control_characters(md_text: Optional[str]) -> str:
+    """Sanitization Pattern: Entfernt unsichtbare ASCII-Kontrollzeichen typsicher."""
+    if not md_text:
+        return ""
+    text = unicodedata.normalize("NFC", str(md_text))
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
 
 

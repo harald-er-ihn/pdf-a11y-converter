@@ -4,9 +4,9 @@
 # Licensed under the GNU General Public License v3 or later
 """
 Isolierter Worker für Tabellen.
-Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen
-sprachabhängig (i18n) auf, um PAC26 Fehler restlos zu beheben.
-Nutzt robuste Toleranzen, um Fließtexte nicht als Tabellen zu halluzinieren.
+Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen auf.
+Behebt die "Table Hallucination", indem für horizontale Linien
+strikt die 'lines' Strategie genutzt wird.
 """
 
 import argparse
@@ -39,12 +39,12 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Strategie "text" erkennt auch Tabellen ohne Linien
-                # (wie z.B. generiert von Pandoc/LaTeX Booktabs).
+                # 🚀 ARCHITEKTUR-FIX: "lines" Strategie horizontal verhindert,
+                # dass reiner Fließtext als Tabelle halluziniert wird!
                 tables = page.find_tables(
                     {
                         "vertical_strategy": "text",
-                        "horizontal_strategy": "text",
+                        "horizontal_strategy": "lines",
                         "intersection_x_tolerance": 15,
                         "intersection_y_tolerance": 15,
                     }
@@ -60,6 +60,23 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                     max_cols = max((len(r) for r in data), default=0)
                     max_rows = len(data)
                     if max_cols < 2 or max_rows < 2:
+                        continue
+
+                    # Sparsity Check gegen Formeln und Fließtext
+                    total_cells = max_cols * max_rows
+                    empty_cells = sum(
+                        1 for row in data for cell in row if not str(cell or "").strip()
+                    )
+                    text_content = "".join(
+                        str(cell or "") for row in data for cell in row
+                    )
+                    math_chars = sum(
+                        1 for c in text_content if c in "∑∫αβγδεθλμπσφω=+-/()[]{}<>^~"
+                    )
+
+                    if total_cells > 0 and empty_cells / total_cells > 0.7:
+                        continue
+                    if math_chars > 3 and total_cells < 15:
                         continue
 
                     bbox = [table.bbox[0], table.bbox[1], table.bbox[2], table.bbox[3]]

@@ -5,8 +5,6 @@
 """
 Isolierter Worker für Tabellen.
 Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen auf.
-Behebt die "Table Hallucination", indem für horizontale Linien
-strikt die 'lines' Strategie genutzt wird.
 """
 
 import argparse
@@ -20,8 +18,8 @@ WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
-import pdfplumber
+from common import cleanup_memory, configure_torch_runtime, setup_worker_logging  # noqa: E402
+import pdfplumber  # pylint: disable=wrong-import-position # noqa: E402
 
 logger = setup_worker_logging("table-worker")
 configure_torch_runtime()
@@ -39,12 +37,17 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: "lines" Strategie horizontal verhindert,
-                # dass reiner Fließtext als Tabelle halluziniert wird!
+                # 🚀 ARCHITEKTUR-FIX: Tectonic exportiert Tabellen oft mit Rechtecken
+                # (.rects) statt Pfaden (.lines). Wir zwingen pdfplumber, diese
+                # geometrischen Formen als echte horizontale Linien zu akzeptieren.
+                # Das verhindert die Halluzination auf reinem Fließtext!
+                all_horizontal_lines = page.edges + page.curves + page.rects
+
                 tables = page.find_tables(
                     {
                         "vertical_strategy": "text",
-                        "horizontal_strategy": "lines",
+                        "horizontal_strategy": "explicit",
+                        "explicit_horizontal_lines": all_horizontal_lines,
                         "intersection_x_tolerance": 15,
                         "intersection_y_tolerance": 15,
                     }

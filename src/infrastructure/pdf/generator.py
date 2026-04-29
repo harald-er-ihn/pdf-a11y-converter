@@ -6,7 +6,7 @@
 PDF Generator Modul (Semantic Overlay Pattern).
 Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
 Baut valides HTML5 für 100% PDF/UA-1 konformes Tagging durch WeasyPrint.
-Behebt den NonStruct-Bug durch striktes Wrapper-Pattern für absolute Koordinaten.
+Behebt WeasyPrint NonStruct-Bugs durch das strikte Wrapper-Pattern.
 """
 
 import html
@@ -63,7 +63,11 @@ def _rasterize_and_compress_pdf(input_pdf: str, temp_out: str) -> None:
 
 
 def _build_element_html(el: SpatialElement) -> str:
-    """Konstruiert das HTML-Element mit dem Wrapper-Pattern für den Document Flow."""
+    """
+    Konstruiert das HTML-Element unter strenger Einhaltung von HTML5,
+    damit WeasyPrint native PDF/UA Tags (/Figure, /Table, /Form, /Math) generiert.
+    Nutzt das Wrapper-Pattern, um den Document-Flow intakt zu halten.
+    """
     tag = (el.type or "p").lower()
 
     if tag in METADATA_TYPES:
@@ -73,10 +77,11 @@ def _build_element_html(el: SpatialElement) -> str:
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
 
-    # 🚀 ARCHITEKTUR-FIX: Der Wrapper übernimmt die absolute Positionierung.
+    # 🚀 ARCHITEKTUR-FIX: Der Wrapper isoliert die absolute Positionierung,
+    # während das semantische Kind-Element im normalen Layout-Flow bleibt!
     c_style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
-        f"width: {w_box}pt; height: {h_box}pt; overflow: visible;"
+        f"width: {w_box}pt; height: {h_box}pt;"
     )
     i_style = (
         "margin: 0; padding: 0; color: transparent; "
@@ -85,6 +90,9 @@ def _build_element_html(el: SpatialElement) -> str:
 
     text = el.text or ""
     clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
+
+    wrapper_start = f'<div style="{c_style}">'
+    wrapper_end = "</div>\n"
 
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
@@ -97,16 +105,16 @@ def _build_element_html(el: SpatialElement) -> str:
         if "<table" in html_t.lower():
             html_t = re.sub(
                 r"<table[^>]*>",
-                f'<table style="{i_style} border-collapse: collapse;">{caption_html}',
+                f'<table style="{i_style} border-collapse: collapse; width:100%;">{caption_html}',
                 html_t,
                 count=1,
                 flags=re.IGNORECASE,
             )
-            return f'<div style="{c_style}">{html_t}</div>\n'
+            return f"{wrapper_start}{html_t}{wrapper_end}"
         return (
-            f'<div style="{c_style}">'
-            f'<table style="{i_style} border-collapse: collapse;">'
-            f"{caption_html}<tr><td>{clean_txt}</td></tr></table></div>\n"
+            f"{wrapper_start}"
+            f'<table style="{i_style} border-collapse: collapse; width:100%;">'
+            f"{caption_html}<tr><td>{clean_txt}</td></tr></table>{wrapper_end}"
         )
 
     if tag in ["list", "ul", "ol"]:
@@ -116,43 +124,40 @@ def _build_element_html(el: SpatialElement) -> str:
             i_txt = _auto_linkify(html.escape(remove_control_characters(raw_i)))
             list_html += f"<li>{i_txt}</li>\n"
         list_html += "</ul>\n"
-        return f'<div style="{c_style}">{list_html}</div>\n'
+        return f"{wrapper_start}{list_html}{wrapper_end}"
 
     if tag == "note":
-        return (
-            f'<div style="{c_style}"><aside style="{i_style}">'
-            f"{clean_txt}</aside></div>\n"
-        )
+        # <aside> mappt WeasyPrint sicher zu /Note
+        return f'{wrapper_start}<aside style="{i_style}"><p>{clean_txt}</p></aside>{wrapper_end}'
 
     if tag == "caption":
-        return (
-            f'<div style="{c_style}"><div role="caption" style="{i_style}">'
-            f"{clean_txt}</div></div>\n"
-        )
+        # Captions müssen strukturell intakt bleiben
+        return f'{wrapper_start}<div role="caption" style="{i_style}">{clean_txt}</div>{wrapper_end}'
 
     if tag == "figure":
         alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        # FIX: Pures <img> Tag generiert garantiert /Figure in der PDF.
-        fig_html = f'<img src="{PIXEL}" alt="{alt_txt}" style="{i_style} width:100%; height:100%;">'
+        fig_html = f'<figure style="margin:0; padding:0;"><img src="{PIXEL}" alt="{alt_txt}" style="{i_style} width:10px; height:10px;">'
         if el.items:
             raw_cap = el.items[0].get("text") or ""
             cap_txt = html.escape(remove_control_characters(raw_cap))
-            fig_html += f'<p style="{i_style}">{cap_txt}</p>'
-        return f'<div style="{c_style}">{fig_html}</div>\n'
+            fig_html += f'<figcaption style="{i_style}">{cap_txt}</figcaption>'
+        fig_html += "</figure>"
+        return f"{wrapper_start}{fig_html}{wrapper_end}"
 
     if tag == "form":
         txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
-        # FIX: Explizites <form> zwingt WeasyPrint zum /Form Tag.
+        # 🚀 ARCHITEKTUR-FIX: PDF/UA /Form Tag wird durch echtes <input> generiert!
         return (
-            f'<div style="{c_style}"><form style="{i_style}" aria-label="{txt}">'
-            f"<p>{txt}</p></form></div>\n"
+            f'{wrapper_start}<form style="{i_style}">'
+            f'<input type="text" aria-label="{txt}" value="{txt}" style="{i_style} border:none; background:transparent;">'
+            f"</form>{wrapper_end}"
         )
 
     if tag == "formula":
-        # FIX: <p role="math"> ist robust für PDF/UA
+        # 🚀 ARCHITEKTUR-FIX: PDF/UA /Math Tag durch native MathML Injektion!
         return (
-            f'<div style="{c_style}"><p role="math" aria-label="Formel" '
-            f'style="{i_style}">{clean_txt}</p></div>\n'
+            f'{wrapper_start}<math style="{i_style}" aria-label="Formel">'
+            f"<mtext>{clean_txt}</mtext></math>{wrapper_end}"
         )
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote"]:
@@ -161,9 +166,7 @@ def _build_element_html(el: SpatialElement) -> str:
     if not text.strip():
         return ""
 
-    return (
-        f'<div style="{c_style}"><{tag} style="{i_style}">{clean_txt}</{tag}></div>\n'
-    )
+    return f'{wrapper_start}<{tag} style="{i_style}">{clean_txt}</{tag}>{wrapper_end}'
 
 
 def _create_html_document(

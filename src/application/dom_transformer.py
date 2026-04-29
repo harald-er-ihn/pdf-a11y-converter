@@ -29,7 +29,7 @@ class DOMTransformer:
 
     @classmethod
     def _merge_paragraphs(cls, elements: List[SpatialElement]) -> List[SpatialElement]:
-        """Fusioniert zersplitterte Textblöcke (P) aggressiv zu sauberen Absätzen."""
+        """Fusioniert zersplitterte Textblöcke (P) zu sauberen Absätzen."""
         if not elements:
             return []
 
@@ -42,7 +42,10 @@ class DOMTransformer:
                 h_curr = max(curr.bbox[3] - curr.bbox[1], 8.0)
                 v_gap = nxt.bbox[1] - curr.bbox[3]
 
-                if x_align and -20.0 <= v_gap <= (h_curr * 4.0):
+                # ARCHITEKTUR-FIX: Reduktion der y-Toleranz auf 1.8.
+                # Ein Faktor von 4.0 verschmilzt fälschlicherweise Header
+                # mit nachfolgenden Paragraphen!
+                if x_align and -20.0 <= v_gap <= (h_curr * 1.8):
                     curr.text = f"{curr.text or ''} {nxt.text or ''}".strip()
                     curr.bbox = [
                         min(curr.bbox[0], nxt.bbox[0]),
@@ -60,7 +63,7 @@ class DOMTransformer:
 
     @classmethod
     def optimize_reading_flow(cls, dom: SpatialDOM) -> SpatialDOM:
-        """Post-Processing: Repariert Zersplitterungen nach Typografie-Korrektur."""
+        """Repariert Zersplitterungen nach Typografie-Korrektur."""
         for page in dom.pages:
             cleaned = [
                 e
@@ -156,7 +159,7 @@ class DOMTransformer:
 
     @classmethod
     def merge_formulas(cls, dom: SpatialDOM, formula_md: str) -> SpatialDOM:
-        """Architektur-Fix: Cluster-basiertes BBox-Merging für defragmentierte Formeln."""
+        """Cluster-basiertes BBox-Merging für defragmentierte Formeln."""
         if not formula_md:
             return dom
 
@@ -178,7 +181,7 @@ class DOMTransformer:
                     continue
 
                 text = el.text or ""
-                # FIX: Verhindert, dass normale Sätze als Formeln geschluckt werden.
+                # Heuristik: Erkennung von Formel-Fragmenten
                 is_math = el.type in ["formula", "equation"] or (
                     el.type == "p"
                     and (

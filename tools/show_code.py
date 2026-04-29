@@ -39,7 +39,9 @@ INCLUDE_EXT = {
 SPECIAL_FILES = {"Dockerfile", "requirements.txt", ".gitignore"}
 
 
-def print_project(output_path: Path, start_path: Path) -> None:
+def print_project(
+    output_path: Path, start_path: Path, python_only: bool = False
+) -> None:
     """Durchsucht ein Verzeichnis und schreibt den Code in die Zieldatei."""
     project_root = start_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,21 +56,29 @@ def print_project(output_path: Path, start_path: Path) -> None:
             if any(part in IGNORE_DIRS for part in file_path.parts):
                 continue
 
-            if file_path.suffix in INCLUDE_EXT or file_path.name in SPECIAL_FILES:
-                if file_path.name == "show_code.py":
+            if python_only:
+                if file_path.suffix != ".py":
+                    continue
+            else:
+                if not (
+                    file_path.suffix in INCLUDE_EXT or file_path.name in SPECIAL_FILES
+                ):
                     continue
 
-                relative_path = file_path.relative_to(project_root)
+            if file_path.name == "show_code.py":
+                continue
 
-                header = f"\n{'=' * 20} START OF FILE: ./{relative_path} {'=' * 20}\n\n"
-                footer = f"\n\n{'=' * 20} END OF FILE: ./{relative_path} {'=' * 20}\n\n"
+            relative_path = file_path.relative_to(project_root)
 
-                out_file.write(header)
-                try:
-                    out_file.write(file_path.read_text(encoding="utf-8"))
-                except Exception as e:
-                    out_file.write(f"[Fehler beim Lesen der Datei: {e}]")
-                out_file.write(footer)
+            header = f"\n{'=' * 20} START OF FILE: ./{relative_path} {'=' * 20}\n\n"
+            footer = f"\n\n{'=' * 20} END OF FILE: ./{relative_path} {'=' * 20}\n\n"
+
+            out_file.write(header)
+            try:
+                out_file.write(file_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                out_file.write(f"[Fehler beim Lesen der Datei: {e}]")
+            out_file.write(footer)
 
     print(f"✅ Code wurde exportiert nach:\n   {output_path}")
 
@@ -84,9 +94,15 @@ if __name__ == "__main__":
         help="Verzeichnis, das exportiert werden soll (z.B. tests)",
     )
 
+    parser.add_argument(
+        "--python-only",
+        action="store_true",
+        help="Exportiert nur Python-Dateien (.py)",
+    )
+
     args = parser.parse_args()
 
     start_dir = Path(args.path)
     target_file = Path("/home/harald/Dokumente/PDF-A11y-Converter/mein_projekt.txt")
 
-    print_project(target_file, start_dir)
+    print_project(target_file, start_dir, python_only=args.python_only)

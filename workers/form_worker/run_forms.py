@@ -4,6 +4,7 @@
 """
 Isolierter Worker für Formulare.
 Extrahiert interaktive Formularfelder (AcroForms) und deren Bounding Boxes.
+Behebt das /Kids Array Problem zur exakten Bestimmung der Lesereihenfolge.
 """
 
 import argparse
@@ -17,22 +18,45 @@ WORKER_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from common import cleanup_memory, configure_torch_runtime, setup_worker_logging
+from common import (  # noqa: E402
+    cleanup_memory,
+    configure_torch_runtime,
+    setup_worker_logging,
+)
 
 logger = setup_worker_logging("form-worker")
 configure_torch_runtime()
 
-import pikepdf  # pylint: disable=wrong-import-position
+import pikepdf  # pylint: disable=wrong-import-position # noqa: E402
+
+
+def _find_rect(node: Any) -> List[float]:
+    """
+    Sucht rekursiv nach der /Rect Bounding Box im PDF Dictionary.
+    AcroForms lagern die visuelle BBox oft in ein untergeordnetes /Kids
+    Array aus (Widget Annotations).
+    """
+    if "/Rect" in node:
+        return [float(x) for x in node["/Rect"]]
+
+    if "/Kids" in node:
+        for kid in node["/Kids"]:
+            rect = _find_rect(kid)
+            if rect != [0.0, 0.0, 10.0, 10.0]:
+                return rect
+
+    # Fallback-Koordinate, falls keine visuelle Repräsentation existiert
+    return [0.0, 0.0, 10.0, 10.0]
 
 
 def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
-    """Sucht nach AcroForm-Feldern im PDF und extrahiert deren Eigenschaften."""
+    """Sucht nach AcroForm-Feldern im PDF und extrahiert Eigenschaften."""
     form_data: Dict[str, List[Dict[str, Any]]] = {"fields": []}
 
     try:
         with pikepdf.open(str(pdf_path)) as pdf:
             if "/AcroForm" not in pdf.Root:
-                logger.info("Keine interaktiven Formulare im PDF gefunden.")
+                logger.info("Keine interaktiven Formulare gefunden.")
                 return form_data
 
             acro_form = pdf.Root.AcroForm
@@ -45,9 +69,8 @@ def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
                 fvalue = str(field.get("/V", "")).strip("()")
                 alt_text = str(field.get("/TU", fname)).strip("()")
 
-                # Extract the precise Bounding Box for reading order!
-                frect = field.get("/Rect")
-                bbox = [float(x) for x in frect] if frect else [0.0, 0.0, 10.0, 10.0]
+                # Architektonischer Fix: Rekursive BBox Suche!
+                bbox = _find_rect(field)
 
                 form_data["fields"].append(
                     {
@@ -67,9 +90,9 @@ def extract_forms(pdf_path: Path) -> Dict[str, List[Dict[str, Any]]]:
 
 def main() -> None:
     """Haupteinstiegspunkt für den Form-Worker."""
-    parser = argparse.ArgumentParser(description="Formular Experte (pikepdf)")
-    parser.add_argument("--input", required=True, help="Pfad zum Eingabe-PDF")
-    parser.add_argument("--output", required=True, help="Pfad zur Ausgabe-JSON")
+    parser = argparse.ArgumentParser(description="Formular Experte")
+    parser.add_argument("--input", required=True, help="Eingabe-PDF")
+    parser.add_argument("--output", required=True, help="Ausgabe-JSON")
     args = parser.parse_args()
 
     input_pdf = Path(args.input)
@@ -94,7 +117,6 @@ def main() -> None:
         sys.exit(1)
 
     finally:
-        # 🚀 ENTERPRISE MEMORY CLEANUP
         cleanup_memory(aggressive=False)
 
 

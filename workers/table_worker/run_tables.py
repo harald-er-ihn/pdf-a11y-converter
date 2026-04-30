@@ -5,6 +5,8 @@
 """
 Isolierter Worker für Tabellen.
 Garantiert 100% rechteckige Tabellen und füllt leere Header-Zellen auf.
+Behebt Table-Halluzinationen bei mathematischen Formeln durch strikte
+Linien- und Grid-Filterung (Sparsity Checks).
 """
 
 import argparse
@@ -37,17 +39,23 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
-                # 🚀 ARCHITEKTUR-FIX: Tectonic exportiert Tabellen oft mit Rechtecken
-                # (.rects) statt Pfaden (.lines). Wir zwingen pdfplumber, diese
-                # geometrischen Formen als echte horizontale Linien zu akzeptieren.
-                # Das verhindert die Halluzination auf reinem Fließtext!
-                all_horizontal_lines = page.edges + page.curves + page.rects
+                # 🚀 ARCHITEKTUR-FIX: Filtere explizit nur WIRKLICHE horizontale Linien.
+                # Verhindert, dass Mathe-Formel-BBoxen (Rects) als Tabellen-Gitter
+                # missinterpretiert werden!
+                explicit_h_lines = []
+                for obj in page.edges + page.curves:
+                    if abs(obj.get("y0", 0) - obj.get("y1", 0)) < 2.0:
+                        explicit_h_lines.append(obj)
+
+                for rect in page.rects:
+                    if rect.get("width", 0) > 20.0 and rect.get("height", 0) < 5.0:
+                        explicit_h_lines.append(rect)
 
                 tables = page.find_tables(
                     {
                         "vertical_strategy": "text",
                         "horizontal_strategy": "explicit",
-                        "explicit_horizontal_lines": all_horizontal_lines,
+                        "explicit_horizontal_lines": explicit_h_lines,
                         "intersection_x_tolerance": 15,
                         "intersection_y_tolerance": 15,
                     }
@@ -65,11 +73,12 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                     if max_cols < 2 or max_rows < 2:
                         continue
 
-                    # Sparsity Check gegen Formeln und Fließtext
+                    # 🚀 ARCHITEKTUR-FIX: Strikterer Sparsity- und Math-Check
                     total_cells = max_cols * max_rows
-                    empty_cells = sum(
-                        1 for row in data for cell in row if not str(cell or "").strip()
+                    filled_cells = sum(
+                        1 for row in data for cell in row if str(cell or "").strip()
                     )
+                    empty_cells = total_cells - filled_cells
                     text_content = "".join(
                         str(cell or "") for row in data for cell in row
                     )
@@ -77,9 +86,13 @@ def extract_spatial_tables(pdf_path: Path, doc_lang: str) -> Dict[str, Any]:
                         1 for c in text_content if c in "∑∫αβγδεθλμπσφω=+-/()[]{}<>^~"
                     )
 
-                    if total_cells > 0 and empty_cells / total_cells > 0.7:
+                    # Harte Ablehnung, wenn es eigentlich keine Daten-Tabelle ist
+                    if filled_cells < 3:
                         continue
-                    if math_chars > 3 and total_cells < 15:
+                    if empty_cells / total_cells > 0.6:
+                        continue
+                    # Wenn viel Mathe drin ist und es eine kleine Tabelle ist -> Formel-Matrix
+                    if math_chars > 3 and filled_cells < 6:
                         continue
 
                     bbox = [table.bbox[0], table.bbox[1], table.bbox[2], table.bbox[3]]

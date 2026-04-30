@@ -43,8 +43,6 @@ class DOMTransformer:
                 v_gap = nxt.bbox[1] - curr.bbox[3]
 
                 # ARCHITEKTUR-FIX: Reduktion der y-Toleranz auf 1.8.
-                # Ein Faktor von 4.0 verschmilzt fälschlicherweise Header
-                # mit nachfolgenden Paragraphen!
                 if x_align and -20.0 <= v_gap <= (h_curr * 1.8):
                     curr.text = f"{curr.text or ''} {nxt.text or ''}".strip()
                     curr.bbox = [
@@ -181,20 +179,38 @@ class DOMTransformer:
                     continue
 
                 text = el.text or ""
-                # Heuristik: Erkennung von Formel-Fragmenten
-                is_math = el.type in ["formula", "equation"] or (
-                    el.type == "p"
-                    and (
-                        "\\" in text
-                        or "∑" in text
-                        or "∫" in text
-                        or text.strip().startswith("$$")
-                        or (
-                            len(text.strip()) < 25
-                            and any(c in text for c in "=+-\\/()[]{}<>^~")
-                        )
+                text_clean = text.strip()
+
+                is_math = el.type in ["formula", "equation"]
+
+                if not is_math and el.type == "p":
+                    # 🚀 ARCHITEKTUR-FIX: Erweiterte Heuristik für zersplitterte Tectonic-Formeln.
+                    # Erkennt winzige Variablen (z.B. '𝐿') als Startpunkt einer Formel,
+                    # wenn sie isoliert oder in dichten Clustern auftreten.
+                    looks_like_math = (
+                        any(c in text_clean for c in "=+-/()[]{}<>^~_∑∫")
+                        or len(text_clean) <= 2
                     )
-                )
+
+                    if looks_like_math:
+                        prev_gap = (
+                            el.bbox[1] - page.elements[i - 1].bbox[3]
+                            if i > 0
+                            else 100.0
+                        )
+                        next_gap = (
+                            page.elements[i + 1].bbox[1] - el.bbox[3]
+                            if i + 1 < len(page.elements)
+                            else 100.0
+                        )
+
+                        # Formeln stehen oft vertikal isoliert oder bilden extreme BBox-Cluster
+                        if (
+                            prev_gap > 15.0
+                            or next_gap < 5.0
+                            or any(c in text_clean for c in "=+-∑∫")
+                        ):
+                            is_math = True
 
                 if is_math and formula_idx < len(latex_formulas):
                     merged_bbox = list(el.bbox)
@@ -202,23 +218,21 @@ class DOMTransformer:
 
                     while j < len(page.elements):
                         nxt = page.elements[j]
-                        nxt_text = nxt.text or ""
-                        nxt_is_math = nxt.type in ["formula", "equation"] or (
-                            nxt.type == "p"
-                            and (
-                                "\\" in nxt_text
-                                or "∑" in nxt_text
-                                or "∫" in nxt_text
-                                or nxt_text.strip().startswith("$$")
-                                or (
-                                    len(nxt_text.strip()) < 25
-                                    and any(c in nxt_text for c in "=+-\\/()[]{}<>^~")
-                                )
+                        nxt_text = (nxt.text or "").strip()
+                        nxt_is_math = nxt.type in ["formula", "equation"]
+
+                        if not nxt_is_math and nxt.type == "p":
+                            nxt_looks_math = (
+                                any(c in nxt_text for c in "=+-/()[]{}<>^~_∑∫")
+                                or len(nxt_text) <= 2
                             )
-                        )
+                            if nxt_looks_math:
+                                nxt_is_math = True
+
                         v_gap = nxt.bbox[1] - merged_bbox[3]
 
-                        if v_gap < 50.0 and nxt_is_math:
+                        # Formel-Fragmente haben sehr kleine vertikale Gaps (< 60pt)
+                        if v_gap < 60.0 and nxt_is_math:
                             merged_bbox = [
                                 min(merged_bbox[0], nxt.bbox[0]),
                                 min(merged_bbox[1], nxt.bbox[1]),

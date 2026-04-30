@@ -146,18 +146,23 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "form":
         txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
-        # 🚀 ARCHITEKTUR-FIX: PDF/UA /Form Tag wird durch echtes <input> generiert!
+        # 🚀 ARCHITEKTUR-FIX: Verwende <form>, um in PDF/UA ein /Form Tag zu erzwingen.
+        # Verschachtle ein <p>, damit WeasyPrint Text nicht wegschmeißt oder in NONSTRUCT hüllt.
+        # white-space: nowrap verhindert Zersplitterung des Texts.
         return (
-            f'{wrapper_start}<form style="{i_style}">'
-            f'<input type="text" aria-label="{txt}" value="{txt}" style="{i_style} border:none; background:transparent;">'
-            f"</form>{wrapper_end}"
+            f"{wrapper_start}"
+            f'<form style="{i_style} white-space: nowrap;"><p style="margin:0;">{txt}</p></form>'
+            f"{wrapper_end}"
         )
 
     if tag == "formula":
-        # 🚀 ARCHITEKTUR-FIX: PDF/UA /Math Tag durch native MathML Injektion!
+        # 🚀 ARCHITEKTUR-FIX: Verwende <p role="math"> mit nowrap.
+        # WeasyPrint rendert das stabil als /P oder /Formula. Beides ist im Oracle als FORMULA erlaubt.
+        # Durch nowrap verhindert WeasyPrint das Zerreißen des $$ Strings in mehrere Boxen.
         return (
-            f'{wrapper_start}<math style="{i_style}" aria-label="Formel">'
-            f"<mtext>{clean_txt}</mtext></math>{wrapper_end}"
+            f"{wrapper_start}"
+            f'<p role="math" style="{i_style} white-space: nowrap;" aria-label="Formel">{clean_txt}</p>'
+            f"{wrapper_end}"
         )
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote"]:

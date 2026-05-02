@@ -48,7 +48,10 @@ def _get_mathml(latex_text: str) -> str:
     try:
         from latex2mathml.converter import convert  # pylint: disable=import-outside-toplevel
 
-        cleaned = re.sub(r"^(\$\$|\\\[|\\\()|(\$\$|\\\]|\\\))$", "", latex_text).strip()
+        # Fix: Strip spaces before applying ^ and $ boundary regex anchors
+        cleaned = re.sub(
+            r"^(?:\$\$|\\\[|\\\()|(?:\$\$|\\\]|\\\))$", "", latex_text.strip()
+        ).strip()
         return convert(cleaned)
     except ImportError:
         pass
@@ -118,6 +121,8 @@ def _build_element_html(el: SpatialElement) -> str:
     )
 
     text = el.text or ""
+    # Fix: Create a safely escaped text block exclusively for HTML attributes
+    safe_attr_txt = html.escape(remove_control_characters(text), quote=True)
     clean_txt = _auto_linkify(html.escape(remove_control_characters(text)))
 
     wrapper_start = f'<div style="{c_style}">'
@@ -167,7 +172,7 @@ def _build_element_html(el: SpatialElement) -> str:
     if tag == "note":
         return (
             f"{wrapper_start}"
-            f'<pac-note aria-label="{clean_txt}" style="{i_style}">'
+            f'<pac-note aria-label="{safe_attr_txt}" style="{i_style}">'
             f"{clean_txt}</pac-note>{wrapper_end}"
         )
 
@@ -180,7 +185,7 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "figure":
         alt_t = html.escape(
-            remove_control_characters(el.alt_text or el.text or "Abbildung")
+            remove_control_characters(el.alt_text or el.text or "Abbildung"), quote=True
         )
         fig_html = (
             f'<img src="{PIXEL}" alt="{alt_t}" title="{alt_t}" '
@@ -193,19 +198,24 @@ def _build_element_html(el: SpatialElement) -> str:
         return f"{wrapper_start}{fig_html}{wrapper_end}"
 
     if tag == "form":
-        txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
+        txt_attr = html.escape(
+            remove_control_characters(el.text or "Formularfeld"), quote=True
+        )
+        txt_html = html.escape(remove_control_characters(el.text or "Formularfeld"))
         return (
             f"{wrapper_start}"
-            f'<pac-form aria-label="{txt}" style="{i_style}">{txt}</pac-form>'
+            f'<pac-form aria-label="{txt_attr}" style="{i_style}">{txt_html}</pac-form>'
             f"{wrapper_end}"
         )
 
     if tag == "formula":
         mathml = _get_mathml(text)
-        mathml_attr = f' data-mathml="{html.escape(mathml)}"' if mathml else ""
+        mathml_attr = (
+            f' data-mathml="{html.escape(mathml, quote=True)}"' if mathml else ""
+        )
         return (
             f"{wrapper_start}"
-            f'<pac-formula title="{clean_txt}" aria-label="{clean_txt}"{mathml_attr} '
+            f'<pac-formula title="{safe_attr_txt}" aria-label="{safe_attr_txt}"{mathml_attr} '
             f'style="{i_style} white-space: nowrap;">{clean_txt}'
             f"</pac-formula>{wrapper_end}"
         )
@@ -252,18 +262,12 @@ def _create_html_document(
 
 def _apply_pdfua_fixes(pdf: pikepdf.Pdf) -> None:
     """
-    Behebt architektonische Fehler im StructTreeRoot und fügt RoleMaps ein.
+    Behebt architektonische Fehler im StructTreeRoot.
     """
     if "/StructTreeRoot" not in pdf.Root:
         return
 
     root = pdf.Root.StructTreeRoot
-
-    # RoleMap für veraPDF-Konformität nicht-standardisierter Tags einfügen
-    if "/RoleMap" not in root:
-        root.RoleMap = pikepdf.Dictionary()
-    if "/Formula" not in root.RoleMap:
-        root.RoleMap["/Formula"] = pikepdf.Name("/Span")
 
     def walk(element: Any) -> Any:
         if isinstance(element, pikepdf.Array):

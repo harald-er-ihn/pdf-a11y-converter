@@ -130,14 +130,25 @@ def figure_rule(element: Any, box: Any, pdf: Any) -> None:
 
 
 def form_rule(element: Any, box: Any, pdf: Any) -> None:
-    """PDF/UA Regel 7.18.4: Formulare ohne Widget brauchen Print/tv Role-Fallback."""
+    """PDF/UA Regel 7.18.4: Formulare ohne interaktives Widget brauchen eine RoleMap Definition."""
     if box.element is None:
         return
     if "Alt" not in element:
         alt = box.element.attrib.get("aria-label") or "Formularfeld"
         element["Alt"] = pydyf.String(alt)
+
+    # FIX: Laut ISO 32000-1 muss der Owner 'PrintField' heißen, damit die Fallback-Rolle greift!
     if "A" not in element:
-        element["A"] = pydyf.Dictionary({"O": "/Print", "Role": "/tv"})
+        element["A"] = pydyf.Array(
+            [
+                pydyf.Dictionary(
+                    {
+                        "O": pydyf.Name("PrintField"),
+                        "Role": pydyf.Name("tv"),  # Text Value Formularfeld
+                    }
+                )
+            ]
+        )
 
 
 # ---------- Lifecycle ----------
@@ -149,6 +160,8 @@ def register_accessibility_rules() -> None:
     register_tag("math", "Formula")
     register_tag("pac-note", "Note")
     register_tag("pac-figure", "Figure")
+
+    # Formular wieder semantisch sauber als /Form Tag generieren lassen
     register_tag("pac-form", "Form")
     register_tag("pac-caption", "Caption")
 

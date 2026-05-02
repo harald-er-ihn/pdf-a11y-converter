@@ -27,9 +27,17 @@ from src.infrastructure.runtime.bootstrap import VenvPatcher
 
 VenvPatcher.patch_all_venvs()
 
+# 🚀 ARCHITEKTUR: JIT-Patching von WeasyPrint BEVOR es importiert wird
+from src.infrastructure.runtime.weasyprint_patch import apply_patch
+
+apply_patch()
+
 from src.application.orchestrator import extract_to_spatial
 from src.infrastructure.pdf.generator import generate_pdf_from_spatial
-from src.infrastructure.validation.validation import check_verapdf, get_verapdf_version
+from src.infrastructure.validation.validation import (
+    check_verapdf,
+    get_verapdf_version,
+)
 from src.vsr_generator import generate_physical_vsr
 
 warnings.filterwarnings("ignore", category=UserWarning, module="requests")
@@ -105,7 +113,7 @@ def main() -> None:
 
     if args.visualscreenreader:
         vsr_path = out_p.with_suffix(".visualscreenreader.html")
-        logger.info("👁️ Generiere Visual Screenreader aus dem fertigen PDF/UA...")
+        logger.info("👁️ Generiere Visual Screenreader aus PDF/UA...")
         if generate_physical_vsr(out_p, vsr_path):
             logger.info("👉 file://%s", vsr_path.absolute())
 

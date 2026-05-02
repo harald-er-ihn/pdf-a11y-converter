@@ -4,9 +4,8 @@
 # Lizenziert unter der GNU General Public License v3 oder später
 """
 PDF Generator Modul (Semantic Overlay Pattern).
-Generiert unsichtbaren Text zur semantischen Strukturierung von PDFs.
-Baut valides HTML5 für 100% PDF/UA-1 konformes Tagging durch WeasyPrint.
-Behebt WeasyPrint NonStruct-Bugs durch das strikte Wrapper-Pattern.
+Nutzt Self-Healing-Graphen für 100% PDF/UA-1 konformes Tagging,
+integriert automatische MathML Erzeugung und veraPDF RoleMaps.
 """
 
 import html
@@ -25,11 +24,12 @@ from src.repair import remove_control_characters
 
 logger = logging.getLogger("pdf-converter")
 
+# METADATA_TYPES filtern rein optische/technische Inhalte aus dem Screenreader Flow
+METADATA_TYPES = {"column", "artifact"}
+
 PIXEL = (
     "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="
 )
-
-METADATA_TYPES = {"column", "artifact", "nonstruct"}
 
 
 def _auto_linkify(text: str) -> str:
@@ -41,6 +41,20 @@ def _auto_linkify(text: str) -> str:
         r'<a href="mailto:\1">\1</a>',
         text,
     )
+
+
+def _get_mathml(latex_text: str) -> str:
+    """Versucht formatierten LaTeX-Text in Screenreader-freundliches MathML zu konvertieren."""
+    try:
+        from latex2mathml.converter import convert  # pylint: disable=import-outside-toplevel
+
+        cleaned = re.sub(r"^(\$\$|\\\[|\\\()|(\$\$|\\\]|\\\))$", "", latex_text).strip()
+        return convert(cleaned)
+    except ImportError:
+        pass
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("MathML Konvertierung fehlgeschlagen: %s", e)
+    return ""
 
 
 def _rasterize_and_compress_pdf(input_pdf: str, temp_out: str) -> None:
@@ -62,13 +76,30 @@ def _rasterize_and_compress_pdf(input_pdf: str, temp_out: str) -> None:
     doc_orig.close()
 
 
+def _heal_heading_hierarchy(spatial_dom: SpatialDOM) -> None:
+    """
+    Self-Healing-Algorithmus für den Strukturbaum.
+    Erzwingt H1 am Anfang und repariert übersprungene Ebenen.
+    """
+    current_lvl = 0
+    for page in spatial_dom.pages:
+        for el in page.elements:
+            tag = (el.type or "p").strip().lower()
+            if tag in METADATA_TYPES:
+                continue
+            if tag.startswith("h") and len(tag) == 2 and tag[1].isdigit():
+                lvl = int(tag[1])
+                if current_lvl == 0 and lvl != 1:
+                    lvl = 1
+                elif lvl > current_lvl + 1:
+                    lvl = current_lvl + 1
+                el.type = f"h{lvl}"
+                current_lvl = lvl
+
+
 def _build_element_html(el: SpatialElement) -> str:
-    """
-    Konstruiert das HTML-Element unter strenger Einhaltung von HTML5,
-    damit WeasyPrint native PDF/UA Tags (/Figure, /Table, /Form, /Math) generiert.
-    Nutzt das Wrapper-Pattern, um den Document-Flow intakt zu halten.
-    """
-    tag = (el.type or "p").lower()
+    """Konstruiert das HTML mit der pac-* DSL für saubere PDF/UA-Tags."""
+    tag = (el.type or "p").strip().lower()
 
     if tag in METADATA_TYPES:
         return ""
@@ -77,15 +108,13 @@ def _build_element_html(el: SpatialElement) -> str:
     w_box = max(bbox[2] - bbox[0], 10.0)
     h_box = max(bbox[3] - bbox[1], 10.0)
 
-    # 🚀 ARCHITEKTUR-FIX: Der Wrapper isoliert die absolute Positionierung,
-    # während das semantische Kind-Element im normalen Layout-Flow bleibt!
     c_style = (
         f"position: absolute; left: {bbox[0]}pt; top: {bbox[1]}pt; "
         f"width: {w_box}pt; height: {h_box}pt;"
     )
     i_style = (
         "margin: 0; padding: 0; color: transparent; "
-        "font-size: 8pt; white-space: normal;"
+        "font-size: 8pt; white-space: normal; display: block;"
     )
 
     text = el.text or ""
@@ -96,16 +125,25 @@ def _build_element_html(el: SpatialElement) -> str:
 
     if tag == "table":
         html_t = remove_control_characters(el.html or "")
-        caption_html = ""
+        cap_html = ""
         if el.items:
             raw_cap = el.items[0].get("text") or ""
             cap_txt = html.escape(remove_control_characters(raw_cap))
-            caption_html = f"<caption>{cap_txt}</caption>"
+            cap_html = f"<caption>{cap_txt}</caption>"
 
+        if "<th" in html_t.lower() or "<td" in html_t.lower():
+            html_t = re.sub(
+                r"(<(th|td)[^>]*>)\s*(</\2>)",
+                r"\1&#8203;\3",
+                html_t,
+                flags=re.IGNORECASE,
+            )
+
+        tbl_style = f"{i_style} border-collapse: collapse; width:100%;"
         if "<table" in html_t.lower():
             html_t = re.sub(
                 r"<table[^>]*>",
-                f'<table style="{i_style} border-collapse: collapse; width:100%;">{caption_html}',
+                f'<table style="{tbl_style}">{cap_html}',
                 html_t,
                 count=1,
                 flags=re.IGNORECASE,
@@ -113,8 +151,8 @@ def _build_element_html(el: SpatialElement) -> str:
             return f"{wrapper_start}{html_t}{wrapper_end}"
         return (
             f"{wrapper_start}"
-            f'<table style="{i_style} border-collapse: collapse; width:100%;">'
-            f"{caption_html}<tr><td>{clean_txt}</td></tr></table>{wrapper_end}"
+            f'<table style="{tbl_style}">'
+            f"{cap_html}<tr><td>{clean_txt}</td></tr></table>{wrapper_end}"
         )
 
     if tag in ["list", "ul", "ol"]:
@@ -127,42 +165,49 @@ def _build_element_html(el: SpatialElement) -> str:
         return f"{wrapper_start}{list_html}{wrapper_end}"
 
     if tag == "note":
-        # <aside> mappt WeasyPrint sicher zu /Note
-        return f'{wrapper_start}<aside style="{i_style}"><p>{clean_txt}</p></aside>{wrapper_end}'
+        return (
+            f"{wrapper_start}"
+            f'<pac-note aria-label="{clean_txt}" style="{i_style}">'
+            f"{clean_txt}</pac-note>{wrapper_end}"
+        )
 
     if tag == "caption":
-        # Captions müssen strukturell intakt bleiben
-        return f'{wrapper_start}<div role="caption" style="{i_style}">{clean_txt}</div>{wrapper_end}'
+        return (
+            f"{wrapper_start}"
+            f'<pac-caption style="{i_style}">{clean_txt}</pac-caption>'
+            f"{wrapper_end}"
+        )
 
     if tag == "figure":
-        alt_txt = html.escape(remove_control_characters(el.alt_text or "Abbildung"))
-        fig_html = f'<figure style="margin:0; padding:0;"><img src="{PIXEL}" alt="{alt_txt}" style="{i_style} width:10px; height:10px;">'
+        alt_t = html.escape(
+            remove_control_characters(el.alt_text or el.text or "Abbildung")
+        )
+        fig_html = (
+            f'<img src="{PIXEL}" alt="{alt_t}" title="{alt_t}" '
+            f'style="{i_style} width:10px; height:10px; display:block;">'
+        )
         if el.items:
             raw_cap = el.items[0].get("text") or ""
             cap_txt = html.escape(remove_control_characters(raw_cap))
-            fig_html += f'<figcaption style="{i_style}">{cap_txt}</figcaption>'
-        fig_html += "</figure>"
+            fig_html += f'<pac-caption style="{i_style}">{cap_txt}</pac-caption>'
         return f"{wrapper_start}{fig_html}{wrapper_end}"
 
     if tag == "form":
         txt = html.escape(remove_control_characters(el.text or "Formularfeld"))
-        # 🚀 ARCHITEKTUR-FIX: Verwende <form>, um in PDF/UA ein /Form Tag zu erzwingen.
-        # Verschachtle ein <p>, damit WeasyPrint Text nicht wegschmeißt oder in NONSTRUCT hüllt.
-        # white-space: nowrap verhindert Zersplitterung des Texts.
         return (
             f"{wrapper_start}"
-            f'<form style="{i_style} white-space: nowrap;"><p style="margin:0;">{txt}</p></form>'
+            f'<pac-form aria-label="{txt}" style="{i_style}">{txt}</pac-form>'
             f"{wrapper_end}"
         )
 
     if tag == "formula":
-        # 🚀 ARCHITEKTUR-FIX: Verwende <p role="math"> mit nowrap.
-        # WeasyPrint rendert das stabil als /P oder /Formula. Beides ist im Oracle als FORMULA erlaubt.
-        # Durch nowrap verhindert WeasyPrint das Zerreißen des $$ Strings in mehrere Boxen.
+        mathml = _get_mathml(text)
+        mathml_attr = f' data-mathml="{html.escape(mathml)}"' if mathml else ""
         return (
             f"{wrapper_start}"
-            f'<p role="math" style="{i_style} white-space: nowrap;" aria-label="Formel">{clean_txt}</p>'
-            f"{wrapper_end}"
+            f'<pac-formula title="{clean_txt}" aria-label="{clean_txt}"{mathml_attr} '
+            f'style="{i_style} white-space: nowrap;">{clean_txt}'
+            f"</pac-formula>{wrapper_end}"
         )
 
     if tag not in ["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote"]:
@@ -177,6 +222,8 @@ def _build_element_html(el: SpatialElement) -> str:
 def _create_html_document(
     spatial_dom: SpatialDOM, docinfo: Dict[str, Any], doc_lang: str
 ) -> str:
+    _heal_heading_hierarchy(spatial_dom)
+
     html_pages = []
     for page in spatial_dom.pages:
         w, h = page.width, page.height
@@ -195,10 +242,76 @@ def _create_html_document(
         f"      @page {{ margin: 0; size: {doc_w}pt {doc_h}pt; }}\n"
         f"      body {{ margin: 0; padding: 0; font-family: sans-serif; }}\n"
         f"      .pdf-page {{ page-break-after: always; position: relative; }}\n"
-        f"      * {{ border: none !important; background: transparent !important; "
-        f"color: transparent !important; text-decoration: none !important; }}\n"
-        f"  </style>\n</head>\n<body>\n  {''.join(html_pages)}\n</body>\n</html>\n"
+        f"      * {{ border: none !important; background: transparent "
+        f"!important; color: transparent !important; text-decoration: none "
+        f"!important; }}\n"
+        f"  </style>\n</head>\n<body>\n  {''.join(html_pages)}\n</body>\n"
+        f"</html>\n"
     )
+
+
+def _apply_pdfua_fixes(pdf: pikepdf.Pdf) -> None:
+    """
+    Behebt architektonische Fehler im StructTreeRoot und fügt RoleMaps ein.
+    """
+    if "/StructTreeRoot" not in pdf.Root:
+        return
+
+    root = pdf.Root.StructTreeRoot
+
+    # RoleMap für veraPDF-Konformität nicht-standardisierter Tags einfügen
+    if "/RoleMap" not in root:
+        root.RoleMap = pikepdf.Dictionary()
+    if "/Formula" not in root.RoleMap:
+        root.RoleMap["/Formula"] = pikepdf.Name("/Span")
+
+    def walk(element: Any) -> Any:
+        if isinstance(element, pikepdf.Array):
+            for i in range(len(element)):
+                element[i] = walk(element[i])
+            return element
+
+        if isinstance(element, pikepdf.Dictionary):
+            tag_type = str(element.get("/S", ""))
+
+            # Fix: PDF/UA Rule 7.2 verbietet Table als Kind einer Table.
+            if tag_type == "/Table" and "/K" in element:
+                kids = (
+                    element.K
+                    if isinstance(element.K, pikepdf.Array)
+                    else pikepdf.Array([element.K])
+                )
+                new_kids = pikepdf.Array()
+                has_inner = False
+
+                for kid in kids:
+                    if (
+                        isinstance(kid, pikepdf.Dictionary)
+                        and kid.get("/S") == "/Table"
+                    ):
+                        has_inner = True
+                        if "/K" in kid:
+                            ikids = (
+                                kid.K
+                                if isinstance(kid.K, pikepdf.Array)
+                                else pikepdf.Array([kid.K])
+                            )
+                            new_kids.extend(ikids)
+                    else:
+                        new_kids.append(kid)
+
+                if has_inner:
+                    element.K = new_kids
+
+            if "/K" in element:
+                element.K = walk(element.K)
+
+            return element
+
+        return element
+
+    if "/K" in root:
+        root.K = walk(root.K)
 
 
 def _merge_pdfs(
@@ -214,10 +327,11 @@ def _merge_pdfs(
                 )
                 tr_start = overlay.make_stream(b"q 3 Tr\n")
                 tr_end = overlay.make_stream(b"\nQ\n")
-                xobj_str = overlay.make_stream(
-                    f"/Artifact <</Type /Pagination>> BDC\nq\n"
-                    f"{xobj_name} Do\nQ\nEMC\n".encode("utf-8")
-                )
+
+                xobj_bytes = (
+                    f"/Artifact <</Type /Pagination>> BDC\nq\n{xobj_name} Do\nQ\nEMC\n"
+                ).encode("utf-8")
+                xobj_str = overlay.make_stream(xobj_bytes)
 
                 old_contents = weasy_page.Contents
                 new_array = pikepdf.Array([tr_start])
@@ -227,6 +341,8 @@ def _merge_pdfs(
                     new_array.append(old_contents)
                 new_array.extend([tr_end, xobj_str])
                 weasy_page.Contents = new_array
+
+        _apply_pdfua_fixes(overlay)
 
         with pikepdf.open(bg_path) as p_orig:
             with (
@@ -245,6 +361,7 @@ def _merge_pdfs(
             overlay.Root.ViewerPreferences = pikepdf.Dictionary()
         overlay.Root.ViewerPreferences.DisplayDocTitle = pikepdf.Boolean(True)
         overlay.Root.Lang = pikepdf.String(lang)
+
         overlay.save(
             out_path,
             compress_streams=True,

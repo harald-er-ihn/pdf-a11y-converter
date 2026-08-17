@@ -1,0 +1,1 @@
+{"name": "signature_worker", "script": "run_signatures.py", "timeout_sec": 300, "phase": "map"}

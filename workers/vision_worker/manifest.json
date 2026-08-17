@@ -1,0 +1,1 @@
+{"name": "vision_worker", "script": "run_vision.py", "timeout_sec": 600, "phase": "reduce"}

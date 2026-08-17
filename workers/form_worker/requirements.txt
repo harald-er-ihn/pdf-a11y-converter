@@ -1,0 +1,2 @@
+pikepdf>=8.10.0
+pdfminer.six>=20221105

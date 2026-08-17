@@ -1,0 +1,9 @@
+-e .                  # Installiert das eigene Projekt (aus pyproject.toml) im Editier-Modus
+pyinstaller>=6.19.0   # Zum Kompilieren der .exe
+pytest                # Für automatisierte Tests
+ruff                  # Linter und Formatter
+pre-commit            # Git Hooks
+djlint                # HTML/Template Linter
+taplo                 # Toml check
+pylint                # Quality check
+flake8                # Quality check

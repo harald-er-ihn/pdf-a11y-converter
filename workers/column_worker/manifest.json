@@ -1,0 +1,6 @@
+{
+  "name": "column_worker",
+  "script": "run_columns.py",
+  "timeout_sec": 120,
+  "phase": "map"
+}

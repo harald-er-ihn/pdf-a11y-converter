@@ -1,0 +1,2 @@
+marker-pdf>=1.10.2
+torch>=2.4.0

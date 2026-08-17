@@ -1,0 +1,1 @@
+{"name": "layout_worker_docling", "script": "run_docling.py", "timeout_sec": 600, "phase": "map", "accepts_force_ocr": true}

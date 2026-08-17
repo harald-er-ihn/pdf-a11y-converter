@@ -1,0 +1,18 @@
+{
+  "paths": {
+    "model_cache_dir": {
+      "windows": "~\\.pdf-a11y-models",
+      "linux": "~/.pdf-a11y-models",
+      "default": "~/.pdf-a11y-models"
+    },
+    "job_dir": {
+      "windows": "%LOCALAPPDATA%\\pdf-a11y-converter\\jobs",
+      "linux": "~/.cache/pdf-a11y-converter/jobs",
+      "default": "~/.cache/pdf-a11y-converter/jobs"
+    }
+  },
+  "verapdf_profiles": {
+    "PDFUA-1": "resources/verapdf/profiles/PDFUA-1.xml",
+    "WCAG_2_2": "resources/verapdf/profiles/WCAG_2_2.xml"
+  }
+}

@@ -1,0 +1,10 @@
+PDF A11y Converter
+Lokale KI-gestützte PDF-Rekonstruktion nach PDF/UA-1.
+
+Dieses Tool nutzt modernste KI-Modelle (Docling, TableFormer, BLIP), 
+um unstrukturierte PDFs semantisch zu erfassen und 
+zu 100% lokal in ein barrierefreies PDF/UA-1 Format zu konvertieren. 
+Es verlassen keine Daten Ihren Rechner.
+
+Version: 0.1.0
+© 2026 Dr. Harald Hutter
